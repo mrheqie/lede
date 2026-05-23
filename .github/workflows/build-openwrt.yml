@@ -62,17 +62,16 @@ jobs:
       run: |
         cd lede
         
-        # 1. 强行创建全新的核心架构定义
+        # 1. 强行锁定核心架构与机型定义
         echo "CONFIG_TARGET_ramips=y" > .config
         echo "CONFIG_TARGET_ramips_mt76x8=y" >> .config
         echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_nradio_wt6285=y" >> .config
         
-        # 2. 注入基础网页、简中语言包和轻量主题
+        # 2. 注入基础网页、简中语言包
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
         echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
-        echo "CONFIG_PACKAGE_luci-mod-dashboard=n" >> .config
         
         # 3. 极限网络瘦身（砍掉无用协议、漫游组件与 IPv6 以节省 flash 空间）
         echo "CONFIG_PACKAGE_wpad-basic-wolfssl=n" >> .config
@@ -82,32 +81,33 @@ jobs:
         echo "CONFIG_IPV6=n" >> .config
         echo "CONFIG_PACKAGE_ip6tables=n" >> .config
         
-        # 4. 【核心精准失能】强行剔除默认集成的 SSR-Plus
+        # 4. 【精准歼灭大雕默认全家桶】强行关闭所有默认勾选的臃肿插件
+        # 这些全不选，能瞬间省下大约 5MB - 7MB 的黄金空间！
         echo "CONFIG_PACKAGE_luci-app-ssr-plus=n" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-ssr-plus is not set" >> .config
+        echo "CONFIG_PACKAGE_luci-app-turboacc=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-nlbwmon=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-vsftpd=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-vlmcsd=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-ddns=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-arpbind=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-autoreboot=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-filetransfer=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-upnp=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-wol=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-accesscontrol=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-rclone_INCLUDE_rclone-ng=n" >> .config
         
-        # 5. 移远 EC200A 4G 模组核心驱动与 3G/4G 拨号组件
-        echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ecm=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-serial=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-serial-wwan=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
-        echo "CONFIG_PACKAGE_comgt=y" >> .config
-        echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
-        echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
-        
-        # 6. 【精准集成】官方标准定义下的 PassWall 和内核声明
+        # 5. 【核心集成】只保留 PassWall 和最核心的 xray-core
         echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
         echo "CONFIG_PACKAGE_xray-core=y" >> .config
         
-        # 7. 严格屏蔽其他多余臃肿插件
-        echo "# CONFIG_PACKAGE_luci-app-accesscontrol is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-wol is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-vsftpd is not set" >> .config
+        # 【极其关键】关闭 PassWall 默认捆绑的、不需要的次要代理解析内核（比如 shadowsocks-rust 等）
+        # 你的侦查日志显示它们会报警告，关闭它们既能省空间，又能消除编译警告
+        echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Shadowsocks_Rust_Client=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Simple_Obfs=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_ShadowsocksR_Libev_Client=n" >> .config
         
-        # 8. 让系统根据以上定义自动补全其余核心依赖
+        # 6. 让系统根据以上毁灭性的精简定义，自动补全其余核心依赖
         make defconfig
 
     - name: Download package
