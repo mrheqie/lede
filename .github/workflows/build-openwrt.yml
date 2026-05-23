@@ -46,23 +46,19 @@ jobs:
       run: |
         cd lede
         
-        # 1. 精准锁定 ramips 架构与 MT76x8 芯片组
+        # 1. 锁定 ramips 架构与 MT76x8 芯片组
         echo "CONFIG_TARGET_ramips=y" >> .config
         echo "CONFIG_TARGET_ramips_mt76x8=y" >> .config
         
-        # 2. 改用兼容性最强的默认参考板配置（避免找不到特殊机型报错）
-        echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_mediatek_mt7628an-eval-board=y" >> .config
+        # 2. 【重中之重】精准指定鲲鹏的专属硬件配置文件
+        echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_nradio_wt6285=y" >> .config
         
-        # 3. 补全底层基础无线驱动与网络路由核心，防止编译依赖缺失
-        echo "CONFIG_PACKAGE_kmod-mt7603=y" >> .config
-        echo "CONFIG_PACKAGE_wpad-basic-wolfssl=y" >> .config
-        
-        # 4. 基础网页与中文支持
+        # 3. 基础网页与中文支持
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
         echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
         
-        # 5. 移远 EC200A 4G 模组核心 ECM 与 串口/拨号 驱动
+        # 4. 移远 EC200A 4G 模组核心 ECM 与 串口/拨号 驱动
         echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ecm=y" >> .config
@@ -71,17 +67,17 @@ jobs:
         echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
         
-        # 6. 4G 支持组件
+        # 5. 4G 拨号与控制组件
         echo "CONFIG_PACKAGE_comgt=y" >> .config
         echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
         echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
         
-        # 7. 严格精简无关的大型固件，腾出 16M 闪存空间
+        # 6. 严格精简，腾出 16M 闪存空间
         echo "# CONFIG_PACKAGE_luci-app-accesscontrol is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-wol is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-vsftpd is not set" >> .config
         
-        # 强行让系统按照上述硬性指标补全所有依赖
+        # 让系统根据鲲鹏的物理定义自动补全所有依赖
         make defconfig
 
     - name: Download package
