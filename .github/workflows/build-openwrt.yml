@@ -46,12 +46,13 @@ jobs:
     - name: Update & Install feeds
       run: |
         cd lede
-        # 1. 只保留这一个核心库，它已经自带了 xray-core 等编译依赖，绝不冲突
-        echo "src-git passwall https://github.com/xiaorouji/openwrt-passwall.git;main" >> feeds.conf.default
-        
-        # 2. 清理并强制重新更新安装
+        # 1. 正常的官方源更新与安装（先让官方源跑完）
         ./scripts/feeds update -a
         ./scripts/feeds install -a
+        
+        # 2. 【大招】绕过 feeds 机制，用最稳的原生 git 直接把 passwall 克隆到 package 目录下
+        # 这样编译器在扫描 package 目录时会自动识别它，绝不会报“找不到目录”的错误
+        git clone --depth=1 https://github.com/xiaorouji/openwrt-passwall.git package/luci-app-passwall
     - name: Generate Custom Configuration (.config)
       run: |
         cd lede
@@ -92,9 +93,8 @@ jobs:
         echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
         echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
         
-        # 6. 【精准集成】PassWall 网页端与最轻量的单 Xray 内核
+        # 6. 【精准集成】暴力克隆形式下的 PassWall 和内核声明
         echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
-        echo "CONFIG_PACKAGE_luci-app-passwall_Iptables_Transparent_Proxy=y" >> .config
         echo "CONFIG_PACKAGE_xray-core=y" >> .config
         
         # 7. 严格屏蔽其他多余臃肿插件
