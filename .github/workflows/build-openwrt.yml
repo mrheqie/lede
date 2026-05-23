@@ -46,18 +46,17 @@ jobs:
     - name: Update & Install feeds
       run: |
         cd lede
-        # 1. 修正为最新的官方组织公有仓库地址，彻底解决 128 认证报错
-        echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
-        echo "src-git passwall_luci https://github.com/Openwrt-Passwall/openwrt-passwall.git;main" >> feeds.conf.default
-        
-        # 2. 更新全部 feeds 索引
+        # 1. 忘掉 feeds.conf.default！让大雕的官方源干干净净地跑完更新和安装
         ./scripts/feeds update -a
-        
-        # 3. 【核心排卡】强行删掉 LEDE 源码自带的旧版同名内核，确保不发生 merging 冲突
-        rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,v2ray-plugin,xray-plugin,geoview}
-        
-        # 4. 安装全部 feeds 到本地编译树
         ./scripts/feeds install -a
+        
+        # 2. 【核心时序修复】必须在 install -a 之后，删掉 feeds 目录里冲突的旧版包
+        rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,v2ray-plugin,xray-plugin,geoview,shadow-tls}
+        
+        # 3. 将 PassWall 官方最新版及所有核心依赖库，直接克隆到本地 package 目录
+        # 本地包的优先级处于食物链顶端，编译器会自动扫描并碾压一切，100% 不会再报缺失！
+        git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git package/openwrt-passwall-packages
+        git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall.git package/openwrt-passwall
 
     - name: Generate Custom Configuration (.config)
       run: |
