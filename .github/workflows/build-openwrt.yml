@@ -46,13 +46,10 @@ jobs:
     - name: Update & Install feeds
       run: |
         cd lede
-        # 1. 明确指定拉取 passwall 的 main 分支，防止默认 master 为空
+        # 1. 只保留这一个核心库，它已经自带了 xray-core 等编译依赖，绝不冲突
         echo "src-git passwall https://github.com/xiaorouji/openwrt-passwall.git;main" >> feeds.conf.default
         
-        # 2. 额外添加 passwall 编译时必不可少的依赖常用源（以防万一包缺失）
-        echo "src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages.git;main" >> feeds.conf.default
-        
-        # 3. 更新并安装
+        # 2. 清理并强制重新更新安装
         ./scripts/feeds update -a
         ./scripts/feeds install -a
     - name: Generate Custom Configuration (.config)
