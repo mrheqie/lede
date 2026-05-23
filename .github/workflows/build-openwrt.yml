@@ -8,6 +8,7 @@ env:
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
   TZ: Asia/Shanghai
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
@@ -22,21 +23,19 @@ jobs:
         DEBIAN_FRONTEND: noninteractive
       run: |
         # 1. 尽可能多地压榨并清理磁盘空间
-          sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell /usr/share/swift /var/lib/apt/lists/*
-          sudo rm -rf /usr/local/share/boost /opt/az /usr/share/game /usr/local/lib/node_modules
-          
-          # 2. 更新源并强制使用无推荐依赖模式安装
-          sudo -E apt-get -qq update
-          
-          # 修正：增加了 --no-install-recommends，防止引入臃肿的 texlive 导致卡死或爆盘
-          sudo -E apt-get -qq install -y --no-install-recommends ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake xxd cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo u-boot-tools upx-ucl unzip xmlto xz-utils zlib1g-dev
-          
-          # 3. 清理收尾
-          sudo -E apt-get -qq autoremove --purge
-          sudo -E apt-get -qq clean
-          sudo timedatectl set-timezone "$TZ"
-          sudo mkdir -p /workdir
-          sudo chown $USER:$USER /workdir
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell /usr/share/swift /var/lib/apt/lists/*
+        sudo rm -rf /usr/local/share/boost /opt/az /usr/share/game /usr/local/lib/node_modules
+        
+        # 2. 更新源并强制使用无推荐依赖模式安装
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install -y --no-install-recommends ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake xxd cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo u-boot-tools upx-ucl unzip xmlto xz-utils zlib1g-dev
+        
+        # 3. 清理收尾
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$USER /workdir
 
     - name: Clone source code
       working-directory: /workdir
@@ -47,6 +46,9 @@ jobs:
     - name: Update & Install feeds
       run: |
         cd lede
+        # 【新增】将 PassWall 依赖源加入本地源列表
+        echo "src-git passwall https://github.com/xiaorouji/openwrt-passwall" >> feeds.conf.default
+        
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
@@ -54,17 +56,31 @@ jobs:
       run: |
         cd lede
         
-        # 1. 强行创建/清空全新的 .config 文件（无需复制过时的内核模板）
+        # 1. 强行创建全新的核心架构定义
         echo "CONFIG_TARGET_ramips=y" > .config
         echo "CONFIG_TARGET_ramips_mt76x8=y" >> .config
         echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_nradio_wt6285=y" >> .config
         
-        # 2. 注入基础网页、简中语言包和主题
+        # 2. 注入基础网页、简中语言包和轻量主题
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
         echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
+        echo "CONFIG_PACKAGE_luci-mod-dashboard=n" >> .config
         
-        # 3. 移远 EC200A 4G 模组核心 ECM 与 串口/拨号 驱动
+        # 3. 极限网络瘦身（砍掉无用协议、漫游组件与 IPv6 以节省 flash 空间）
+        echo "CONFIG_PACKAGE_wpad-basic-wolfssl=n" >> .config
+        echo "CONFIG_PACKAGE_wpad-mini=y" >> .config
+        echo "CONFIG_PACKAGE_ppp=n" >> .config
+        echo "CONFIG_PACKAGE_ppp-mod-pppoe=n" >> .config
+        echo "CONFIG_IPV6=n" >> .config
+        echo "CONFIG_PACKAGE_ip6tables=n" >> .config
+        
+        # 4. 【核心精准失能】强行剔除默认集成的 SSR-Plus
+        echo "CONFIG_PACKAGE_luci-app-ssr-plus=n" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-ssr-plus is not set" >> .config
+        
+        # 5. 移远 EC200A 4G 模组核心驱动与 3G/4G 拨号组件
         echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ecm=y" >> .config
@@ -72,18 +88,21 @@ jobs:
         echo "CONFIG_PACKAGE_kmod-usb-serial-wwan=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
-        
-        # 4. 4G 拨号与控制组件
         echo "CONFIG_PACKAGE_comgt=y" >> .config
         echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
         echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
         
-        # 5. 严格精简，防止臃肿，确保固件不超 16M 闪存空间
+        # 6. 【精准集成】PassWall 网页端与最轻量的单 Xray 内核
+        echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-passwall_Iptables_Transparent_Proxy=y" >> .config
+        echo "CONFIG_PACKAGE_xray-core=y" >> .config
+        
+        # 7. 严格屏蔽其他多余臃肿插件
         echo "# CONFIG_PACKAGE_luci-app-accesscontrol is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-wol is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-vsftpd is not set" >> .config
         
-        # 6. 让系统根据你上面定义的“鲲鹏(wt6285)”设备，自动补全其余所有依赖和当前最新内核
+        # 8. 让系统根据以上定义自动补全其余核心依赖
         make defconfig
 
     - name: Download package
@@ -106,4 +125,5 @@ jobs:
       if: steps.compile.outputs.status == 'success'
       with:
         name: OpenWrt_KunpengCC_EC200A_Firmware
-        path: lede/bin/targets/ramips/mt76x8/*
+        # 精准上传最终 bin 固件
+        path: lede/bin/targets/ramips/mt76x8/*.bin
