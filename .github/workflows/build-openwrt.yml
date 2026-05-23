@@ -85,8 +85,14 @@ jobs:
         echo "# CONFIG_PACKAGE_luci-app-accesscontrol is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-wol is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-vsftpd is not set" >> .config
+
+        cd lede
+        # 强行清除可能导致报错的过时 4.14 内核配置，让系统回归默认内核
+        sed -i '/CONFIG_LINUX_4_14/d' .config
         
-        # 让系统根据鲲鹏的物理定义自动补全所有依赖
+        # 如果你是通过给旧配置瘦身，可以再加上这行（可选）：
+        # sed -i 's/CONFIG_LINUX_4_14=y/# CONFIG_LINUX_4_14 is not set/' .config
+        
         make defconfig
 
     - name: Download package
