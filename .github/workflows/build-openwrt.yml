@@ -1,0 +1,101 @@
+name: Build Kunpeng CC (MT7628 + EC200A) Dedicated Firmware
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+
+env:
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Initialization environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell /usr/share/swift /var/lib/apt/lists/*
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake ctxt cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo u-boot-tools upx-ucl unzip swig xmlto xz-utils zlib1g-dev
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$USER /workdir
+
+    - name: Clone source code
+      working-directory: /workdir
+      run: |
+        git clone $REPO_URL -b $REPO_BRANCH lede
+        ln -sf /workdir/lede $GITHUB_WORKSPACE/lede
+
+    - name: Update & Install feeds
+      run: |
+        cd lede
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Generate Custom Configuration (.config)
+      run: |
+        cd lede
+        
+        # 1. 基础硬件架构锁定 MT7628
+        echo "CONFIG_TARGET_ramips=y" >> .config
+        echo "CONFIG_TARGET_ramips_mt76x8=y" >> .config
+        echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_iot-gateway=y" >> .config
+        
+        # 2. 基础系统与极简 LuCI 界面
+        echo "CONFIG_PACKAGE_luci=y" >> .config
+        echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
+        echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
+        
+        # 3. 【核心】移远 EC200A (ASR方案) 所需的 Linux 内核 USB 驱动
+        echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ecm=y" >> .config  # ASR芯片最核心的ECM网卡驱动
+        echo "CONFIG_PACKAGE_kmod-usb-serial=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-serial-wwan=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config # 用于向EC200A发送AT命令和拨号
+        echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
+        
+        # 4. 【网络拨号基础工具】
+        echo "CONFIG_PACKAGE_comgt=y" >> .config
+        echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config        # 防止4G模组被识别成U盘
+        echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
+        
+        # 5. 【极限空间优化】拒绝臃肿，腾出 16M Flash 空间
+        echo "# CONFIG_PACKAGE_luci-app-accesscontrol is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-wol is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-vsftpd is not set" >> .config
+        
+        # 让系统自动补全依赖
+        make defconfig
+
+    - name: Download package
+      id: package
+      run: |
+        cd lede
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: Compile the firmware
+      id: compile
+      run: |
+        cd lede
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: Upload firmware to Artifacts
+      uses: actions/upload-artifact@v4
+      if: steps.compile.outputs.status == 'success'
+      with:
+        name: OpenWrt_KunpengCC_EC200A_Firmware
+        path: lede/bin/targets/ramips/mt76x8/*
