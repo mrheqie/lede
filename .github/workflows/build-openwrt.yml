@@ -54,20 +54,17 @@ jobs:
       run: |
         cd lede
         
-        # 1. 复制 ramips 的默认种子配置文件作为模板
-        cp target/linux/ramips/config-5.4 .config 2>/dev/null || cp target/linux/ramips/config-4.14 .config
-        
-        # 2. 强行写入核心架构、芯片和精准设备名称
-        echo "CONFIG_TARGET_ramips=y" >> .config
+        # 1. 强行创建/清空全新的 .config 文件（无需复制过时的内核模板）
+        echo "CONFIG_TARGET_ramips=y" > .config
         echo "CONFIG_TARGET_ramips_mt76x8=y" >> .config
         echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_nradio_wt6285=y" >> .config
         
-        # 3. 注入基础网页、简中语言包和主题
+        # 2. 注入基础网页、简中语言包和主题
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
         echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
         
-        # 4. 移远 EC200A 4G 模组核心 ECM 与 串口/拨号 驱动
+        # 3. 移远 EC200A 4G 模组核心 ECM 与 串口/拨号 驱动
         echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ecm=y" >> .config
@@ -76,23 +73,17 @@ jobs:
         echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
         
-        # 5. 4G 拨号与控制组件
+        # 4. 4G 拨号与控制组件
         echo "CONFIG_PACKAGE_comgt=y" >> .config
         echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
         echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
         
-        # 6. 严格精简，防止臃肿，确保固件不超 16M 闪存空间
+        # 5. 严格精简，防止臃肿，确保固件不超 16M 闪存空间
         echo "# CONFIG_PACKAGE_luci-app-accesscontrol is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-wol is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-vsftpd is not set" >> .config
-
-        cd lede
-        # 强行清除可能导致报错的过时 4.14 内核配置，让系统回归默认内核
-        sed -i '/CONFIG_LINUX_4_14/d' .config
         
-        # 如果你是通过给旧配置瘦身，可以再加上这行（可选）：
-        # sed -i 's/CONFIG_LINUX_4_14=y/# CONFIG_LINUX_4_14 is not set/' .config
-        
+        # 6. 让系统根据你上面定义的“鲲鹏(wt6285)”设备，自动补全其余所有依赖和当前最新内核
         make defconfig
 
     - name: Download package
