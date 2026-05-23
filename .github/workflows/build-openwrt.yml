@@ -46,12 +46,15 @@ jobs:
     - name: Update & Install feeds
       run: |
         cd lede
-        # 【新增】将 PassWall 依赖源加入本地源列表
-        echo "src-git passwall https://github.com/xiaorouji/openwrt-passwall" >> feeds.conf.default
+        # 1. 明确指定拉取 passwall 的 main 分支，防止默认 master 为空
+        echo "src-git passwall https://github.com/xiaorouji/openwrt-passwall.git;main" >> feeds.conf.default
         
+        # 2. 额外添加 passwall 编译时必不可少的依赖常用源（以防万一包缺失）
+        echo "src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages.git;main" >> feeds.conf.default
+        
+        # 3. 更新并安装
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-
     - name: Generate Custom Configuration (.config)
       run: |
         cd lede
