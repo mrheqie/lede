@@ -46,13 +46,19 @@ jobs:
     - name: Update & Install feeds
       run: |
         cd lede
-        # 1. 正常的官方源更新与安装（先让官方源跑完）
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
+        # 1. 修正为最新的官方组织公有仓库地址，彻底解决 128 认证报错
+        echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
+        echo "src-git passwall_luci https://github.com/Openwrt-Passwall/openwrt-passwall.git;main" >> feeds.conf.default
         
-        # 2. 【大招】绕过 feeds 机制，用最稳的原生 git 直接把 passwall 克隆到 package 目录下
-        # 这样编译器在扫描 package 目录时会自动识别它，绝不会报“找不到目录”的错误
-        git clone --depth=1 https://github.com/xiaorouji/openwrt-passwall.git package/luci-app-passwall
+        # 2. 更新全部 feeds 索引
+        ./scripts/feeds update -a
+        
+        # 3. 【核心排卡】强行删掉 LEDE 源码自带的旧版同名内核，确保不发生 merging 冲突
+        rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,v2ray-plugin,xray-plugin,geoview}
+        
+        # 4. 安装全部 feeds 到本地编译树
+        ./scripts/feeds install -a
+
     - name: Generate Custom Configuration (.config)
       run: |
         cd lede
@@ -93,7 +99,7 @@ jobs:
         echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
         echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
         
-        # 6. 【精准集成】暴力克隆形式下的 PassWall 和内核声明
+        # 6. 【精准集成】官方标准定义下的 PassWall 和内核声明
         echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
         echo "CONFIG_PACKAGE_xray-core=y" >> .config
         
@@ -125,5 +131,4 @@ jobs:
       if: steps.compile.outputs.status == 'success'
       with:
         name: OpenWrt_KunpengCC_EC200A_Firmware
-        # 精准上传最终 bin 固件
         path: lede/bin/targets/ramips/mt76x8/*.bin
