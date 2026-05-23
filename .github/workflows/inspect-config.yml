@@ -1,0 +1,77 @@
+name: Inspect nradio_wt6285 Default Source Configuration
+
+on:
+  workflow_dispatch: # 支持在 GitHub 页面上手动点击运行
+
+env:
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
+  TZ: Asia/Shanghai
+
+jobs:
+  inspect:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Initialization Environment
+      run: |
+        sudo -E apt-get -qq update
+        # 只安装生成配置所需的极其基础的依赖，极速缩短初始化时间
+        sudo -E apt-get -qq install -y build-essential gawk git libncurses5-dev libssl-dev gettext unzip file
+        sudo timedatectl set-timezone "$TZ"
+
+    - name: Clone Source Code
+      run: |
+        # 深度设为 1，只拉取最新代码，不拉取历史提交记录以节省时间
+        git clone --depth=1 $REPO_URL -b $REPO_BRANCH lede
+
+    - name: 1. 侦查底层 Makefile 硬件物理定义
+      run: |
+        echo "=============================================================="
+        echo " 🔍 正在从 mt76x8.mk 源码中提取 nradio_wt6285 物理布局与预设驱动..."
+        echo "=============================================================="
+        cd lede
+        # 精准截取设备定义代码块并高亮输出
+        sed -n '/define Device\/nradio_wt6285/,/endef/p' target/linux/ramips/image/mt76x8.mk
+        echo "=============================================================="
+
+    - name: Update & Install Feeds
+      run: |
+        cd lede
+        # 让官方 feeds 跑完索引，否则系统无法补全依赖包的完整名称
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: 2. 侦查执行 defconfig 后的默认软件全景图
+      run: |
+        cd lede
+        
+        # 注入目标机型核心三要素
+        echo "CONFIG_TARGET_ramips=y" > .config
+        echo "CONFIG_TARGET_ramips_mt76x8=y" >> .config
+        echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_nradio_wt6285=y" >> .config
+        
+        # 让系统根据大雕源码的潜规则自动补全默认配置
+        make defconfig
+        
+        echo ""
+        echo "=============================================================="
+        echo " 📦 模块一：该机型默认勾选的所有 Web 插件 (luci-app-*)"
+        echo "=============================================================="
+        grep "=y" .config | grep "luci-app-" | sort || echo "❌ 未发现默认集成的 Web 插件"
+        
+        echo ""
+        echo "=============================================================="
+        echo " 🌐 模块二：该机型默认勾选的网络/无线/4G 驱动 (kmod-*)"
+        echo "=============================================================="
+        grep "=y" .config | grep -E "kmod-mt76|kmod-usb|kmod-net" | sort || echo "❌ 未发现默认集成的核心网卡驱动"
+        
+        echo ""
+        echo "=============================================================="
+        echo " 🎨 模块三：该机型默认勾选的主题界面 (luci-theme-*)"
+        echo "=============================================================="
+        grep "=y" .config | grep "luci-theme-" | sort || echo "❌ 未发现默认集成的 UI 主题"
+        echo "=============================================================="
