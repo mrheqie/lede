@@ -46,36 +46,42 @@ jobs:
       run: |
         cd lede
         
-        # 1. 基础硬件架构锁定 MT7628
+        # 1. 精准锁定 ramips 架构与 MT76x8 芯片组
         echo "CONFIG_TARGET_ramips=y" >> .config
         echo "CONFIG_TARGET_ramips_mt76x8=y" >> .config
-        echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_iot-gateway=y" >> .config
         
-        # 2. 基础系统与极简 LuCI 界面
+        # 2. 改用兼容性最强的默认参考板配置（避免找不到特殊机型报错）
+        echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_mediatek_mt7628an-eval-board=y" >> .config
+        
+        # 3. 补全底层基础无线驱动与网络路由核心，防止编译依赖缺失
+        echo "CONFIG_PACKAGE_kmod-mt7603=y" >> .config
+        echo "CONFIG_PACKAGE_wpad-basic-wolfssl=y" >> .config
+        
+        # 4. 基础网页与中文支持
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
         echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
         
-        # 3. 【核心】移远 EC200A (ASR方案) 所需的 Linux 内核 USB 驱动
+        # 5. 移远 EC200A 4G 模组核心 ECM 与 串口/拨号 驱动
         echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ecm=y" >> .config  # ASR芯片最核心的ECM网卡驱动
+        echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ecm=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-serial=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-serial-wwan=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config # 用于向EC200A发送AT命令和拨号
+        echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
         
-        # 4. 【网络拨号基础工具】
+        # 6. 4G 支持组件
         echo "CONFIG_PACKAGE_comgt=y" >> .config
-        echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config        # 防止4G模组被识别成U盘
+        echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
         echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
         
-        # 5. 【极限空间优化】拒绝臃肿，腾出 16M Flash 空间
+        # 7. 严格精简无关的大型固件，腾出 16M 闪存空间
         echo "# CONFIG_PACKAGE_luci-app-accesscontrol is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-wol is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-vsftpd is not set" >> .config
         
-        # 让系统自动补全依赖
+        # 强行让系统按照上述硬性指标补全所有依赖
         make defconfig
 
     - name: Download package
