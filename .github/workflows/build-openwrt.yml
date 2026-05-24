@@ -46,22 +46,13 @@ jobs:
     - name: Update & Install feeds
       run: |
         cd lede
-        # 清除可能残留的旧干扰项，强行注入纯净、结构标准的 SSR-Plus 核心源
-        sed -i '/helloworld/d' feeds.conf.default
-        sed -i '$a src-git helloworld https://github.com/fw87100/openwrt-developer;master' feeds.conf.default
-        
+        # 1. 正常更新大雕官方基础源
         ./scripts/feeds update -a
-        
-        # 如果上面那个源依然因为大杂烩被脚本嫌弃，我们用第二手绝杀：直接用 git 强行把包克隆到 package 目录下
-        git clone https://github.com/fw87100/openwrt-developer.git-backup 2>/dev/null || true
-        # 很多时候最稳妥的是直接拉取包含了 ssr-plus 的经典独立包
-        git clone https://github.com/coolsnowwolf/luci-app-ssr-plus.git package/luci-app-ssr-plus
-        # 顺便把依赖的 shadowsocksr 核心源码也直接抓过来，双保险免得 feeds 报错
-        git clone https://github.com/xiaorouji/openwrt-passwall.git package/passwall_tmp
-        mv package/passwall_tmp/shadowsocksr-libev package/shadowsocksr-libev 2>/dev/null || true
-        rm -rf package/passwall_tmp
-
         ./scripts/feeds install -a
+        
+        # 2. 【终极修复】甩开 feeds 系统，直接把 fw876 的纯正 SSR-Plus 源码硬塞进本地 package 目录！
+        # 这样做完全绕过索引检查，彻底终结 "No such file" 报错。
+        git clone --depth=1 https://github.com/fw876/helloworld.git package/helloworld
 
     - name: Generate Custom Configuration (.config)
       run: |
