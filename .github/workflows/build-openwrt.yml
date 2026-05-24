@@ -26,7 +26,7 @@ jobs:
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell /usr/share/swift /var/lib/apt/lists/*
         sudo rm -rf /usr/local/share/boost /opt/az /usr/share/game /usr/local/lib/node_modules
         
-        # 2. 更新源并强制使用无推荐依赖模式安装
+        # 2. 更新源并强制使用无推荐依赖模式安装编译工具链
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install -y --no-install-recommends ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake xxd cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo u-boot-tools upx-ucl unzip xmlto xz-utils zlib1g-dev
         
@@ -46,66 +46,53 @@ jobs:
     - name: Update & Install feeds
       run: |
         cd lede
-        # 1. 忘掉 feeds.conf.default！让大雕的官方源干干净净地跑完更新和安装
+        # 纯净运行大雕自带源的更新与安装，不再引入任何外部冲突仓库
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-        
-        # 2. 【核心时序修复】必须在 install -a 之后，删掉 feeds 目录里冲突的旧版包
-        rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,v2ray-plugin,xray-plugin,geoview,shadow-tls}
-        
-        # 3. 将 PassWall 官方最新版及所有核心依赖库，直接克隆到本地 package 目录
-        # 本地包的优先级处于食物链顶端，编译器会自动扫描并碾压一切，100% 不会再报缺失！
-        git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git package/openwrt-passwall-packages
-        git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall.git package/openwrt-passwall
 
     - name: Generate Custom Configuration (.config)
       run: |
         cd lede
         
-        # 1. 强行锁定核心架构与机型定义
+        # 1. 强行锁定核心架构与机型定义（自动触发底层的 4G 模组驱动）
         echo "CONFIG_TARGET_ramips=y" > .config
         echo "CONFIG_TARGET_ramips_mt76x8=y" >> .config
         echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_nradio_wt6285=y" >> .config
         
-        # 2. 注入基础网页、简中语言包
+        # 2. 注入基础网页、简中语言包与核心防火墙
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
         echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
         
-        # 3. 极限网络瘦身（砍掉无用协议、漫游组件与 IPv6 以节省 flash 空间）
+        # 3. 明确启用 SSR-Plus，并进行极限内核瘦身（只留核心，拒绝巨无霸）
+        echo "CONFIG_PACKAGE_luci-app-ssr-plus=y" >> .config
+        # 强行关闭 SSR-Plus 内部自带的 Xray/V2ray 等大体积 Golang 内核，只留轻量化的本地 SS/SSR
+        echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_V2ray=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Xray=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Socks5_Proxy=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Moira=n" >> .config
+        
+        # 4. 【精准歼灭大雕默认全家桶】强行关闭所有默认勾选、但占地方的臃肿插件
+        # 这一步将为 15.4MB 的小空间腾出巨大的空白包厢
+        echo "CONFIG_PACKAGE_luci-app-vsftpd=n" >> .config       # 砍掉 FTP 服务器
+        echo "CONFIG_PACKAGE_luci-app-vlmcsd=n" >> .config       # 砍掉 KMS 微软激活
+        echo "CONFIG_PACKAGE_luci-app-nlbwmon=n" >> .config      # 砍掉流量监控
+        echo "CONFIG_PACKAGE_luci-app-ddns=n" >> .config         # 砍掉动态域名
+        echo "CONFIG_PACKAGE_luci-app-arpbind=n" >> .config      # 砍掉 ARP 绑定
+        echo "CONFIG_PACKAGE_luci-app-filetransfer=n" >> .config  # 砍掉文件传输
+        echo "CONFIG_PACKAGE_luci-app-wol=n" >> .config           # 砍掉网络唤醒
+        echo "CONFIG_PACKAGE_luci-app-accesscontrol=n" >> .config # 砍掉访问控制
+        echo "CONFIG_PACKAGE_luci-app-upnp=n" >> .config          # 砍掉 UPnP 自动端口映射
+        echo "CONFIG_PACKAGE_luci-app-rclone_INCLUDE_rclone-ng=n" >> .config # 砍掉网盘挂载依赖
+        
+        # 5. 极限网络与无线精简（关闭不需要的臃肿组件与 IPv6）
         echo "CONFIG_PACKAGE_wpad-basic-wolfssl=n" >> .config
         echo "CONFIG_PACKAGE_wpad-mini=y" >> .config
         echo "CONFIG_PACKAGE_ppp=n" >> .config
         echo "CONFIG_PACKAGE_ppp-mod-pppoe=n" >> .config
         echo "CONFIG_IPV6=n" >> .config
         echo "CONFIG_PACKAGE_ip6tables=n" >> .config
-        
-        # 4. 【精准歼灭大雕默认全家桶】强行关闭所有默认勾选的臃肿插件
-        # 这些全不选，能瞬间省下大约 5MB - 7MB 的黄金空间！
-        echo "CONFIG_PACKAGE_luci-app-ssr-plus=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-turboacc=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-nlbwmon=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-vsftpd=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-vlmcsd=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-ddns=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-arpbind=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-autoreboot=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-filetransfer=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-upnp=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-wol=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-accesscontrol=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-rclone_INCLUDE_rclone-ng=n" >> .config
-        
-        # 5. 【核心集成】只保留 PassWall 和最核心的 xray-core
-        echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
-        echo "CONFIG_PACKAGE_xray-core=y" >> .config
-        
-        # 【极其关键】关闭 PassWall 默认捆绑的、不需要的次要代理解析内核（比如 shadowsocks-rust 等）
-        # 你的侦查日志显示它们会报警告，关闭它们既能省空间，又能消除编译警告
-        echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Shadowsocks_Rust_Client=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Simple_Obfs=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_ShadowsocksR_Libev_Client=n" >> .config
         
         # 6. 让系统根据以上毁灭性的精简定义，自动补全其余核心依赖
         make defconfig
