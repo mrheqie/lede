@@ -46,9 +46,21 @@ jobs:
     - name: Update & Install feeds
       run: |
         cd lede
-        # 【关键修复】在大雕源中强行追加第三方 helloworld 科学上网源，把下架的 SSR-Plus 捡回来
-        sed -i '$a src-git helloworld https://github.com/fw87100/openwrt-developer' feeds.conf.default
+        # 清除可能残留的旧干扰项，强行注入纯净、结构标准的 SSR-Plus 核心源
+        sed -i '/helloworld/d' feeds.conf.default
+        sed -i '$a src-git helloworld https://github.com/fw87100/openwrt-developer;master' feeds.conf.default
+        
         ./scripts/feeds update -a
+        
+        # 如果上面那个源依然因为大杂烩被脚本嫌弃，我们用第二手绝杀：直接用 git 强行把包克隆到 package 目录下
+        git clone https://github.com/fw87100/openwrt-developer.git-backup 2>/dev/null || true
+        # 很多时候最稳妥的是直接拉取包含了 ssr-plus 的经典独立包
+        git clone https://github.com/coolsnowwolf/luci-app-ssr-plus.git package/luci-app-ssr-plus
+        # 顺便把依赖的 shadowsocksr 核心源码也直接抓过来，双保险免得 feeds 报错
+        git clone https://github.com/xiaorouji/openwrt-passwall.git package/passwall_tmp
+        mv package/passwall_tmp/shadowsocksr-libev package/shadowsocksr-libev 2>/dev/null || true
+        rm -rf package/passwall_tmp
+
         ./scripts/feeds install -a
 
     - name: Generate Custom Configuration (.config)
