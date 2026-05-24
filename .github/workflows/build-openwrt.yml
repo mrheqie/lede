@@ -46,7 +46,8 @@ jobs:
     - name: Update & Install feeds
       run: |
         cd lede
-        # 纯净运行大雕自带源的更新与安装，不再引入任何外部冲突仓库
+        # 【关键修复】在大雕源中强行追加第三方 helloworld 科学上网源，把下架的 SSR-Plus 捡回来
+        sed -i '$a src-git helloworld https://github.com/fw87100/openwrt-developer' feeds.conf.default
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
@@ -65,8 +66,9 @@ jobs:
         echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
         
-        # 3. 【强行焊死】SSR-Plus 核心网页组件
+        # 3. 【强行焊死】SSR-Plus 核心网页组件及必备客户端
         echo "CONFIG_PACKAGE_luci-app-ssr-plus=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_ShadowsocksR_Libev_Client=y" >> .config
         
         # 【精准降温】只关闭 SSR-Plus 内部的巨无霸 Xray 和 V2ray 内核（这就是省空间的关键）
         # 这样它就会退而求其次，自动去编译只有几百 KB 的 C 语言轻量 SS/SSR 内核
@@ -75,16 +77,23 @@ jobs:
         echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Socks5_Proxy=n" >> .config
         echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Moira=n" >> .config
         
-        # 4. 【强行焊死】移远 EC200A 4G 模组所需的所有底层物理驱动
-        # 既然系统默认容易漏掉，我们就用手动 =y 的最高优先级强制它编译进去！
+        # 4. 【强行焊死】移远 EC200A 4G 模组底层驱动 + 4G 网页拨号控制面板
         echo "CONFIG_PACKAGE_kmod-usb-core=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-rndis=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ncm=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-serial=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-serial-wwan=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
         echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
+        # 补齐 4G 网页拨号协议组件，没有这些你在后台找不到“3G/4G 拨号”协议
+        echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
+        echo "CONFIG_PACKAGE_luci-proto-qmi=y" >> .config
+        echo "CONFIG_PACKAGE_comgt=y" >> .config
+        echo "CONFIG_PACKAGE_usb-modem-node=y" >> .config
         
         # 5. 让系统自动补全其余依赖，但绝不反选上面我们强行塞进去的驱动
         make defconfig
