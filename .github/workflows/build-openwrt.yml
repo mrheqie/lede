@@ -98,7 +98,20 @@ jobs:
         echo "CONFIG_PACKAGE_comgt=y" >> .config
         echo "CONFIG_PACKAGE_usb-modem-node=y" >> .config
         
-        # 5. 让系统自动补全其余依赖，但绝不反选上面我们强行塞进去的驱动
+        # 5. 【极限减肥】强行反选/剔除大雕源码默认捆绑的无用“全家桶”插件与重型依赖
+        # 这些组件对于 MT7628 这类小闪存/小内存设备是极大负担，4G 环境下完全不需要
+        echo "CONFIG_PACKAGE_luci-app-vlmcsd=n" >> .config       # 剔除 KMS 激活网页
+        echo "CONFIG_PACKAGE_luci-app-vsftpd=n" >> .config       # 剔除 FTP 服务器网页
+        echo "CONFIG_PACKAGE_luci-app-wol=n" >> .config          # 剔除 网络唤醒
+        echo "CONFIG_PACKAGE_luci-app-arpbind=n" >> .config      # 剔除 IP/MAC 绑定
+        echo "CONFIG_PACKAGE_luci-app-nlbwmon=n" >> .config      # 剔除 流量统计 (后台常驻极其吃内存)
+        echo "CONFIG_PACKAGE_luci-app-access-control=n" >> .config # 剔除 访问控制
+        echo "CONFIG_PACKAGE_luci-app-ddns=n" >> .config         # 剔除 动态域名
+        echo "CONFIG_PACKAGE_nmap=n" >> .config                  # 剔除 极其臃肿的 nmap 网络扫描工具
+        echo "CONFIG_PACKAGE_vsftpd-alt=n" >> .config            # 剔除 FTP 底层依赖
+        echo "CONFIG_PACKAGE_vlmcsd=n" >> .config                # 剔除 KMS 底层依赖
+        
+        # 6. 让系统自动补全其余依赖，但绝不反选上面我们强行塞进去的驱动
         make defconfig
 
     - name: Download package
