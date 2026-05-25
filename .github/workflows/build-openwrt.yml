@@ -125,7 +125,14 @@ jobs:
         echo "CONFIG_PACKAGE_kmod-usb-storage-uas=n" >> .config   # 关闭 高速 USB 存储协议
         echo "CONFIG_PACKAGE_block-mount=n" >> .config            # 关闭 开机自动磁盘挂载检测
         echo "CONFIG_PACKAGE_luci-app-usb-printer=n" >> .config   # 关闭 USB 打印机共享
-        
+        # 第四轮：【断根级】剥离包管理器与传统宽带拨号
+        echo "CONFIG_PACKAGE_luci-app-package-manager=n" >> .config  # 剔除 软件包管理 UI (前端)
+        echo "CONFIG_PACKAGE_luci-app-opkg=n" >> .config             # 剔除 软件包管理 UI (别名)
+        echo "CONFIG_PACKAGE_opkg=n" >> .config                      # 剔除 底层 opkg 命令行工具
+        echo "CONFIG_PACKAGE_ppp=n" >> .config                       # 剔除 底层拨号协议
+        echo "CONFIG_PACKAGE_ppp-mod-pppoe=n" >> .config             # 剔除 宽带 PPPoE 拨号模块
+        echo "CONFIG_PACKAGE_luci-proto-ppp=n" >> .config            # 剔除 LuCI 宽带拨号界面
+        echo "CONFIG_PACKAGE_luci-app-sqm=n" >> .config              # 剔除 SQM QOS (对4G没用且极吃性能)
         # 6. 让系统自动补全其余依赖，但绝不反选上面我们强行塞进去的驱动
         make defconfig
 
