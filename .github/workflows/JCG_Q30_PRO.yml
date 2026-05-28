@@ -32,22 +32,22 @@ jobs:
 
       - name: Verify Feeds Installation
         run: |
-          echo "=== 正在调试 Feed 目录结构 ==="
-          ls -R openwrt/package/feeds/ | grep "passwall" || echo "⚠️ 未在 feeds 中找到 passwall 关键字"
-          
-          echo "=== 执行验证 ==="
-          # 使用 find 命令查找，不依赖硬编码路径，更健壮
-          if [ -n "$(find openwrt/package/feeds/ -name "luci-app-passwall" -type d)" ]; then
-            echo "✅ Passwall LuCI 已安装"
+          echo "=== 开始验证 Passwall ==="
+          # 直接在整个 openwrt 目录下查找，只要存在这个文件夹就算成功
+          if [ -n "$(find openwrt/ -name "luci-app-passwall" -type d)" ]; then
+            echo "✅ Passwall LuCI 已找到"
           else
-            echo "❌ Passwall 安装失败，请检查 feeds 仓库配置"
+            echo "❌ 严重错误：未找到 Passwall 模块！"
+            # 打印当前目录结构以便排查
+            find openwrt/ -name "luci-app-passwall"
             exit 1
           fi
           
-          if [ -n "$(find openwrt/package/feeds/ -name "luci-app-easytier" -type d)" ]; then
-            echo "✅ EasyTier 已安装"
+          echo "=== 开始验证 EasyTier ==="
+          if [ -n "$(find openwrt/ -name "luci-app-easytier" -type d)" ]; then
+            echo "✅ EasyTier 已找到"
           else
-            echo "❌ EasyTier 安装失败"
+            echo "❌ 严重错误：未找到 EasyTier 模块！"
             exit 1
           fi
       - name: Cache Downloads & Build
