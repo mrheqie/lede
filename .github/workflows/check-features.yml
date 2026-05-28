@@ -17,40 +17,30 @@ jobs:
 
       - name: Prepare Source
         run: |
-          # 1. 关键：强制 Git 不使用任何凭据检查，防止它尝试询问密码
           git config --global credential.helper ""
-          
           git clone -b master https://github.com/immortalwrt/immortalwrt openwrt
           cd openwrt
-          
           mkdir -p package/passwall
-          
-          # 2. 尝试克隆你提到的仓库 (或者原作者的)
-          # 使用 --depth 1 参数可以极大提高 CI 的克隆速度并减少 submodule 带来的复杂问题
           git clone --depth 1 https://github.com/Openwrt-Passwall/openwrt-passwall package/passwall
-          
-          # 更新基础 feeds
+          # 依然需要 update feeds，但不再需要 install 全量依赖，这步快且稳
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Configure and Generate Manifest
+      - name: Scan Package List
         run: |
           cd openwrt
-          # 必须先配置目标设备，否则无法生成对应设备的 manifest
-          # 为 JCG Q30 PRO (MT7981) 配置
-          echo "CONFIG_TARGET_mediatek=y" >> .config
-          echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jcg_q30-pro=y" >> .config
+          # 【核心修改】不跑 make manifest，直接扫描目录
+          echo "=== 固件中集成的 LuCI 应用 (插件) ===" > ../feature-list.txt
+          # 查找 package 和 feeds 目录下所有的 luci-app 文件夹
+          find package feeds -maxdepth 3 -name "luci-app-*" -type d >> ../feature-list.txt
           
-          # 更新配置
+          echo -e "\n=== 固件中集成的核心组件 (Xray/Sing-box等) ===" >> ../feature-list.txt
+          find package feeds -maxdepth 3 -name "*-core" -type d >> ../feature-list.txt
+          
+          echo -e "\n=== 检查当前默认生成的配置文件 (.config) ===" >> ../feature-list.txt
+          # 这一步生成 defconfig，让我们看看系统默认想编译什么
           make defconfig
-          
-          # 生成 manifest
-          make manifest
-          
-          # 确认文件路径是否正确（有时路径中会有微小差异）
-          # 使用 find 命令来寻找生成的 .manifest 文件，防止路径写死导致的错误
-          find bin/targets/ -name "*.manifest" -exec cp {} ../feature-list.txt \;
+          cat .config | grep "CONFIG_PACKAGE_" | grep "=y" >> ../feature-list.txt
 
       - name: Upload Manifest
         uses: actions/upload-artifact@v4
