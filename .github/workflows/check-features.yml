@@ -19,10 +19,14 @@ jobs:
         run: |
           git clone -b master https://github.com/immortalwrt/immortalwrt openwrt
           cd openwrt
-          # 修正：使用更规范的 feed 格式
-          echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall' >> feeds.conf.default
-          # 关键点：分步 update 和 install，并添加 -f 强制覆盖
-          ./scripts/feeds update -f
+          
+          # 【方案优化】放弃 feeds.conf.default，直接 clone 到 package 目录
+          # 这能绕过 feeds 索引失败的问题，OpenWrt 编译时会自动识别
+          mkdir -p package/passwall
+          git clone https://github.com/xiaorouji/openwrt-passwall package/passwall
+          
+          # 更新并安装 feed 依赖 (仅用于其他必要的基础包，如 luci)
+          ./scripts/feeds update -a
           ./scripts/feeds install -a
 
       - name: Configure and Generate Manifest
