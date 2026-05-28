@@ -1,0 +1,114 @@
+name: Build JCG Q30 PRO Firmware
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev
+
+      - name: Prepare Source
+        run: |
+          git config --global credential.helper ""
+          git clone -b master https://github.com/immortalwrt/immortalwrt openwrt
+          cd openwrt
+          
+          # 1. 修复 Feed 配置 (确保子目录完整性)
+          sed -i '$a src-git passwall https://github.com/xiaorouji/openwrt-passwall.git;main' feeds.conf.default
+          sed -i '$a src-git passwall_luci https://github.com/xiaorouji/openwrt-passwall.git;luci' feeds.conf.default
+          sed -i '$a src-git easytier https://github.com/EasyTier/luci-app-easytier.git' feeds.conf.default
+          
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Verify Feeds Installation
+        run: |
+          # 1. 检查 Passwall 核心文件
+          ls openwrt/package/feeds/passwall/luci-app-passwall/Makefile && echo "✅ Passwall Luci 已通过 main 分支安装" || { echo "❌ Passwall Makefile 缺失"; exit 1; }
+          
+          # 2. 检查 Passwall 二级菜单 (Luci) 是否就位
+          ls openwrt/package/feeds/passwall_luci/luci-app-passwall/Makefile && echo "✅ Passwall Luci 模块已通过 luci 分支安装" || { echo "❌ Passwall Luci 模块缺失"; exit 1; }
+          
+          # 3. 检查 EasyTier
+          ls openwrt/package/feeds/easytier/luci-app-easytier/Makefile && echo "✅ EasyTier 已安装" || { echo "❌ EasyTier Makefile 缺失"; exit 1; }
+
+      - name: Cache Downloads & Build
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt/dl
+            openwrt/build_dir
+          # 使用 workflow 文件哈希作为 Key，保证环境变动时缓存自动更新
+          key: imm-jcg-q30-build-${{ hashFiles('.github/workflows/*.yml') }}
+          restore-keys: |
+            imm-jcg-q30-build-
+
+      - name: Configure Firmware
+        run: |
+          cd openwrt
+          
+          # 目标配置
+          echo "CONFIG_TARGET_mediatek=y" >> .config
+          echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jcg_q30-pro=y" >> .config
+          
+          # 核心功能与补丁
+          echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-easytier=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-tun=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
+          
+          make defconfig
+          
+          # 深度精简 (前后端包一网打尽)
+          PLUGINS_TO_REMOVE=(
+            "luci-app-aria2" "aria2" "luci-app-transmission" "transmission-daemon" "transmission-web"
+            "luci-app-qbittorrent" "qbittorrent" "luci-app-samba4" "samba4-server" "samba4-libs"
+            "luci-app-minidlna" "minidlna" "luci-app-filemanager" "dufs"
+            "luci-app-dae" "dae" "luci-app-openclash" "luci-app-softether" 
+            "luci-app-tailscale" "tailscale"
+          )
+          
+          for pkg in "${PLUGINS_TO_REMOVE[@]}"; do
+            sed -i "/CONFIG_PACKAGE_${pkg}=y/d" .config
+            echo "CONFIG_PACKAGE_${pkg}=n" >> .config
+          done
+          
+          make defconfig
+          
+          # 验证精简生效
+          for pkg in "${PLUGINS_TO_REMOVE[@]}"; do
+            if grep -q "CONFIG_PACKAGE_${pkg}=y" .config; then
+              echo "❌ 警告: ${pkg} 强制启用了依赖，请手动排查"
+              exit 1
+            fi
+          done
+
+      - name: Compile Firmware
+        run: |
+          cd openwrt
+          # 策略：前置检查内存，若内存过低则使用单线程以防 OOM
+          make -j4 || make -j1 V=s
+
+      - name: Generate SHA256 & Upload
+        run: |
+          cd openwrt/bin/targets/mediatek/filogic
+          sha256sum *.bin > sha256sums.txt
+
+      - name: Upload Firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-jcg-q30-pro
+          path: |
+            openwrt/bin/targets/mediatek/filogic/*.bin
+            openwrt/bin/targets/mediatek/filogic/sha256sums.txt
