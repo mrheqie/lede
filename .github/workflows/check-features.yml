@@ -17,15 +17,19 @@ jobs:
 
       - name: Prepare Source
         run: |
+          # 1. 关键：强制 Git 不使用任何凭据检查，防止它尝试询问密码
+          git config --global credential.helper ""
+          
           git clone -b master https://github.com/immortalwrt/immortalwrt openwrt
           cd openwrt
           
-          # 【方案优化】放弃 feeds.conf.default，直接 clone 到 package 目录
-          # 这能绕过 feeds 索引失败的问题，OpenWrt 编译时会自动识别
           mkdir -p package/passwall
-          git clone https://github.com/xiaorouji/openwrt-passwall package/passwall
           
-          # 更新并安装 feed 依赖 (仅用于其他必要的基础包，如 luci)
+          # 2. 尝试克隆你提到的仓库 (或者原作者的)
+          # 使用 --depth 1 参数可以极大提高 CI 的克隆速度并减少 submodule 带来的复杂问题
+          git clone --depth 1 https://github.com/Openwrt-Passwall/openwrt-passwall package/passwall
+          
+          # 更新基础 feeds
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
