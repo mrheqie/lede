@@ -22,8 +22,8 @@ jobs:
           cd openwrt
           
           # 1. 修复 Feed 配置 (确保子目录完整性)
-          sed -i '$a src-git passwall https://github.com/xiaorouji/openwrt-passwall.git;main' feeds.conf.default
-          sed -i '$a src-git passwall_luci https://github.com/xiaorouji/openwrt-passwall.git;luci' feeds.conf.default
+          sed -i '$a src-git passwall https://github.com/Openwrt-Passwall/openwrt-passwall.git;main' feeds.conf.default
+          sed -i '$a src-git passwall_luci https://github.com/Openwrt-Passwall/openwrt-passwall.git;luci' feeds.conf.default
           sed -i '$a src-git easytier https://github.com/EasyTier/luci-app-easytier.git' feeds.conf.default
           
           ./scripts/feeds update -a
