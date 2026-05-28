@@ -119,11 +119,11 @@ jobs:
           echo "=== 当前目录所有文件 ==="
           ls -lah
           
-          # 精确查找 sysupgrade 固件
-          FIRMWARE=$(ls -1 *-squashfs-sysupgrade.bin 2>/dev/null | head -n1)
+          # 1. 精确查找 sysupgrade 固件 (注意后缀改成了 .itb)
+          FIRMWARE=$(ls -1 *-squashfs-sysupgrade.itb 2>/dev/null | head -n1)
           
           if [ -z "$FIRMWARE" ]; then
-            echo "❌ 致命错误: 未找到 squashfs-sysupgrade.bin!"
+            echo "❌ 致命错误: 未找到 squashfs-sysupgrade.itb!"
             echo "请检查上方 ls 输出，确认固件实际文件名"
             exit 1
           fi
@@ -136,15 +136,16 @@ jobs:
             exit 1
           fi
           
-          # 生成校验和
-          sha256sum *.bin > sha256sums.txt
+          # 2. 生成校验和 (针对 .itb 生成)
+          sha256sum *.itb > sha256sums.txt
           echo "✅ 固件校验通过，准备上传"
-      
-          - name: Upload Firmware
-            uses: actions/upload-artifact@v4
-            with:
-              name: openwrt-jcg-q30-pro
-              path: |
-                openwrt/bin/targets/mediatek/filogic/*-squashfs-sysupgrade.bin
-                openwrt/bin/targets/mediatek/filogic/sha256sums.txt
-              retention-days: 7
+
+      # 3. 修复了缩进！注意这里的 - name 必须与上面的 - name 对齐
+      - name: Upload Firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-jcg-q30-pro
+          path: |
+            openwrt/bin/targets/mediatek/filogic/*-squashfs-sysupgrade.itb
+            openwrt/bin/targets/mediatek/filogic/sha256sums.txt
+          retention-days: 7
