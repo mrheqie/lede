@@ -1,0 +1,41 @@
+name: Scan Firmware Features
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev
+
+      - name: Prepare Source
+        run: |
+          git clone -b master https://github.com/immortalwrt/immortalwrt openwrt
+          cd openwrt
+          # 假设你已经添加了 PassWall 等源
+          echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall' >> feeds.conf.default
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Generate Feature Manifest
+        run: |
+          cd openwrt
+          # 生成针对 JCG Q30 PRO 的默认配置文件
+          make defconfig
+          # 仅生成 package manifest，无需编译整个固件
+          make manifest
+          # 将清单文件导出，方便你查看
+          cp bin/targets/mediatek/filogic/openwrt-mediatek-filogic-jcg_q30-pro-packages.manifest ./feature-list.txt
+
+      - name: Upload Manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: feature-list
+          path: feature-list.txt
