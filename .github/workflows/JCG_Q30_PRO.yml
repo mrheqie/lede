@@ -111,15 +111,39 @@ jobs:
           # 策略：前置检查内存，若内存过低则使用单线程以防 OOM
           make -j4 || make -j1 V=s
 
-      - name: Generate SHA256 & Upload
+      - name: Post-Build Verify & Prepare Upload
         run: |
           cd openwrt/bin/targets/mediatek/filogic
+          
+          echo "=== 当前目录所有文件 ==="
+          ls -lah
+          
+          # 精确查找 sysupgrade 固件
+          FIRMWARE=$(ls -1 *-squashfs-sysupgrade.bin 2>/dev/null | head -n1)
+          
+          if [ -z "$FIRMWARE" ]; then
+            echo "❌ 致命错误: 未找到 squashfs-sysupgrade.bin!"
+            echo "请检查上方 ls 输出，确认固件实际文件名"
+            exit 1
+          fi
+          
+          SIZE=$(stat -c%s "$FIRMWARE")
+          echo "✅ 找到固件: $FIRMWARE (大小: $((SIZE/1024/1024)) MB)"
+          
+          if [ "$SIZE" -lt 10485760 ]; then
+            echo "❌ 致命错误: 固件大小小于 10MB，这不是完整固件!"
+            exit 1
+          fi
+          
+          # 生成校验和
           sha256sum *.bin > sha256sums.txt
-
-      - name: Upload Firmware
-        uses: actions/upload-artifact@v4
-        with:
-          name: openwrt-jcg-q30-pro
-          path: |
-            openwrt/bin/targets/mediatek/filogic/*.bin
-            openwrt/bin/targets/mediatek/filogic/sha256sums.txt
+          echo "✅ 固件校验通过，准备上传"
+      
+          - name: Upload Firmware
+            uses: actions/upload-artifact@v4
+            with:
+              name: openwrt-jcg-q30-pro
+              path: |
+                openwrt/bin/targets/mediatek/filogic/*-squashfs-sysupgrade.bin
+                openwrt/bin/targets/mediatek/filogic/sha256sums.txt
+              retention-days: 7
