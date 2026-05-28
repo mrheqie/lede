@@ -32,12 +32,24 @@ jobs:
 
       - name: Verify Feeds Installation
         run: |
-          # 检查 Passwall 是否安装成功
-          # 注意：现在所有文件都在 package/feeds/passwall 下
-          ls openwrt/package/feeds/passwall/luci-app-passwall/Makefile && echo "✅ Passwall 安装成功" || { echo "❌ Passwall 安装失败"; exit 1; }
+          echo "=== 正在调试 Feed 目录结构 ==="
+          ls -R openwrt/package/feeds/ | grep "passwall" || echo "⚠️ 未在 feeds 中找到 passwall 关键字"
           
-          # 检查 EasyTier
-          ls openwrt/package/feeds/easytier/luci-app-easytier/Makefile && echo "✅ EasyTier 安装成功" || { echo "❌ EasyTier 安装失败"; exit 1; }
+          echo "=== 执行验证 ==="
+          # 使用 find 命令查找，不依赖硬编码路径，更健壮
+          if [ -n "$(find openwrt/package/feeds/ -name "luci-app-passwall" -type d)" ]; then
+            echo "✅ Passwall LuCI 已安装"
+          else
+            echo "❌ Passwall 安装失败，请检查 feeds 仓库配置"
+            exit 1
+          fi
+          
+          if [ -n "$(find openwrt/package/feeds/ -name "luci-app-easytier" -type d)" ]; then
+            echo "✅ EasyTier 已安装"
+          else
+            echo "❌ EasyTier 安装失败"
+            exit 1
+          fi
       - name: Cache Downloads & Build
         uses: actions/cache@v4
         with:
