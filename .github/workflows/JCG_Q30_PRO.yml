@@ -9,7 +9,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 0
       - name: Setup Environment
         run: |
           sudo apt-get update
@@ -56,10 +57,10 @@ jobs:
           path: |
             openwrt/dl
             openwrt/build_dir
-          # 使用 workflow 文件哈希作为 Key，保证环境变动时缓存自动更新
-          key: imm-jcg-q30-build-${{ hashFiles('.github/workflows/*.yml') }}
+          # 在 key 的末尾加上 -v2，强制刷新缓存
+          key: imm-jcg-q30-build-v2-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            imm-jcg-q30-build-
+            imm-jcg-q30-build-v2-
 
       - name: Configure Firmware
         run: |
