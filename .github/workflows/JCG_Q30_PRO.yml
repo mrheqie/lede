@@ -31,15 +31,14 @@ jobs:
 
       - name: Verify Feeds Installation
         run: |
-          # 1. 检查 Passwall 核心文件
-          ls openwrt/package/feeds/passwall/luci-app-passwall/Makefile && echo "✅ Passwall Luci 已通过 main 分支安装" || { echo "❌ Passwall Makefile 缺失"; exit 1; }
-          
-          # 2. 检查 Passwall 二级菜单 (Luci) 是否就位
-          ls openwrt/package/feeds/passwall_luci/luci-app-passwall/Makefile && echo "✅ Passwall Luci 模块已通过 luci 分支安装" || { echo "❌ Passwall Luci 模块缺失"; exit 1; }
-          
+          # 1. 检查 Passwall 核心组件 (来自主仓库 main 分支)
+          ls openwrt/package/feeds/passwall/xray-core/Makefile && echo "✅ Passwall Xray-Core 已就绪" || { echo "❌ Passwall 核心缺失"; exit 1; }
+    
+          # 2. 检查 Passwall LuCI 界面 (来自 luci 分支)
+          ls openwrt/package/feeds/passwall_luci/luci-app-passwall/Makefile && echo "✅ Passwall LuCI 已就绪" || { echo "❌ Passwall LuCI 缺失"; exit 1; }
+    
           # 3. 检查 EasyTier
-          ls openwrt/package/feeds/easytier/luci-app-easytier/Makefile && echo "✅ EasyTier 已安装" || { echo "❌ EasyTier Makefile 缺失"; exit 1; }
-
+          ls openwrt/package/feeds/easytier/luci-app-easytier/Makefile && echo "✅ EasyTier 已安装" || { echo "❌ EasyTier 缺失"; exit 1; }
       - name: Cache Downloads & Build
         uses: actions/cache@v4
         with:
