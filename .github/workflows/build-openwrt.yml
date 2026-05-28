@@ -51,7 +51,6 @@ jobs:
         ./scripts/feeds install -a
         
         # 2. 【终极修复】甩开 feeds 系统，直接把 fw876 的纯正 SSR-Plus 源码硬塞进本地 package 目录！
-        # 这样做完全绕过索引检查，彻底终结 "No such file" 报错。
         git clone --depth=1 https://github.com/fw876/helloworld.git package/helloworld
 
     - name: Generate Custom Configuration (.config)
@@ -63,22 +62,21 @@ jobs:
         echo "CONFIG_TARGET_ramips_mt76x8=y" >> .config
         echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_nradio_wt6285=y" >> .config
         
-        # 2. 注入基础网页与简中语言包
+        # 2. 注入基础网页、简中语言包与核心硬件加速 (MT7628必备)
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
         echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
         
         # 3. 【强行焊死】SSR-Plus 核心网页组件及必备客户端
         echo "CONFIG_PACKAGE_luci-app-ssr-plus=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_ShadowsocksR_Libev_Client=y" >> .config
-        
-        # 【精准降温】只关闭 SSR-Plus 内部的巨无霸 Xray 和 V2ray 内核（这就是省空间的关键）
-        # 这样它就会退而求其次，自动去编译只有几百 KB 的 C 语言轻量 SS/SSR 内核
-        echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_V2ray=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Xray=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Socks5_Proxy=n" >> .config
-        echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Moira=n" >> .config
+        # 【精准降温】彻底禁用 Go 语言编写的重型内核，只留几百 KB 的 C 语言内核
+        echo "# CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_V2ray is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Xray is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Socks5_Proxy is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Moira is not set" >> .config
         
         # 4. 【强行焊死】移远 EC200A 4G 模组底层驱动 + 4G 网页拨号控制面板
         echo "CONFIG_PACKAGE_kmod-usb-core=y" >> .config
@@ -92,48 +90,31 @@ jobs:
         echo "CONFIG_PACKAGE_kmod-usb-serial-wwan=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
         echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
-        # 补齐 4G 网页拨号协议组件，没有这些你在后台找不到“3G/4G 拨号”协议
         echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
         echo "CONFIG_PACKAGE_luci-proto-qmi=y" >> .config
         echo "CONFIG_PACKAGE_comgt=y" >> .config
         echo "CONFIG_PACKAGE_usb-modem-node=y" >> .config
         
-        # 5. 【极限减肥】强行反选/剔除大雕源码默认捆绑的无用“全家桶”插件与重型依赖
-        # 第一轮基础清理
-        echo "CONFIG_PACKAGE_luci-app-vlmcsd=n" >> .config       # 剔除 KMS 激活网页
-        echo "CONFIG_PACKAGE_luci-app-vsftpd=n" >> .config       # 剔除 FTP 服务器网页
-        echo "CONFIG_PACKAGE_luci-app-wol=n" >> .config          # 剔除 网络唤醒
-        echo "CONFIG_PACKAGE_luci-app-arpbind=n" >> .config      # 剔除 IP/MAC 绑定
-        echo "CONFIG_PACKAGE_luci-app-nlbwmon=n" >> .config      # 剔除 流量统计 (开机极度拖速)
-        echo "CONFIG_PACKAGE_luci-app-access-control=n" >> .config # 剔除 访问控制
-        echo "CONFIG_PACKAGE_luci-app-ddns=n" >> .config         # 剔除 动态域名
-        echo "CONFIG_PACKAGE_nmap=n" >> .config                  # 剔除 nmap 扫描工具
-        echo "CONFIG_PACKAGE_vsftpd-alt=n" >> .config            # 剔除 FTP 底层
-        echo "CONFIG_PACKAGE_vlmcsd=n" >> .config                # 剔除 KMS 底层
-
-        # 第二轮进阶清理（专为 4G 路由开机提速设计）
-        echo "CONFIG_PACKAGE_luci-app-uugamebooster=n" >> .config  # 拔除 网易UU加速器网页
-        echo "CONFIG_PACKAGE_uugamebooster=n" >> .config           # 拔除 UU加速器后台进程
-        echo "CONFIG_PACKAGE_luci-app-xlnetacc=n" >> .config       # 拔除 迅雷快鸟网页
-        echo "CONFIG_PACKAGE_xlnetacc=n" >> .config                # 拔除 迅雷快鸟后台
-        echo "CONFIG_PACKAGE_luci-app-upnp=n" >> .config           # 拔除 UPnP 网页 (4G内网无用)
-        echo "CONFIG_PACKAGE_miniupnpd=n" >> .config               # 拔除 UPnP 后台守护进程
-        echo "CONFIG_PACKAGE_luci-app-autoreboot=n" >> .config     # 剔除 定时重启插件
+        # 5. 【安全精简】彻底剔除该机型默认捆绑的无用/臃肿插件，释放极限空间
+        # 注意：这里只砍应用层，坚决不碰底层网络协议 (如 ppp/opkg)
+        echo "# CONFIG_PACKAGE_luci-app-vlmcsd is not set" >> .config
+        echo "# CONFIG_PACKAGE_vlmcsd is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-vsftpd is not set" >> .config
+        echo "# CONFIG_PACKAGE_vsftpd-alt is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-wol is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-upnp is not set" >> .config
+        echo "# CONFIG_PACKAGE_miniupnpd is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-ddns is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-nlbwmon is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-arpbind is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-accesscontrol is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-rclone is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-passwall is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-uugamebooster is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-xlnetacc is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-sqm is not set" >> .config
         
-        # 第三轮：切断无用 USB 存储与挂载检测（可显著缩短开机检测时间）
-        echo "CONFIG_PACKAGE_kmod-usb-storage=n" >> .config       # 关闭 USB 挂载 U 盘能力
-        echo "CONFIG_PACKAGE_kmod-usb-storage-uas=n" >> .config   # 关闭 高速 USB 存储协议
-        echo "CONFIG_PACKAGE_block-mount=n" >> .config            # 关闭 开机自动磁盘挂载检测
-        echo "CONFIG_PACKAGE_luci-app-usb-printer=n" >> .config   # 关闭 USB 打印机共享
-        # 第四轮：【断根级】剥离包管理器与传统宽带拨号
-        echo "CONFIG_PACKAGE_luci-app-package-manager=n" >> .config  # 剔除 软件包管理 UI (前端)
-        echo "CONFIG_PACKAGE_luci-app-opkg=n" >> .config             # 剔除 软件包管理 UI (别名)
-        echo "CONFIG_PACKAGE_opkg=n" >> .config                      # 剔除 底层 opkg 命令行工具
-        echo "CONFIG_PACKAGE_ppp=n" >> .config                       # 剔除 底层拨号协议
-        echo "CONFIG_PACKAGE_ppp-mod-pppoe=n" >> .config             # 剔除 宽带 PPPoE 拨号模块
-        echo "CONFIG_PACKAGE_luci-proto-ppp=n" >> .config            # 剔除 LuCI 宽带拨号界面
-        echo "CONFIG_PACKAGE_luci-app-sqm=n" >> .config              # 剔除 SQM QOS (对4G没用且极吃性能)
-        # 6. 让系统自动补全其余依赖，但绝不反选上面我们强行塞进去的驱动
+        # 6. 让系统自动补全其余依赖
         make defconfig
 
     - name: Download package
@@ -157,3 +138,4 @@ jobs:
       with:
         name: OpenWrt_KunpengCC_EC200A_Firmware
         path: lede/bin/targets/ramips/mt76x8/*.bin
+        retention-days: 7
