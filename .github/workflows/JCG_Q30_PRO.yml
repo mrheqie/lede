@@ -11,6 +11,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Setup Environment
         run: |
           sudo apt-get update
@@ -34,12 +35,10 @@ jobs:
       - name: Verify Feeds Installation
         run: |
           echo "=== 开始验证 Passwall ==="
-          # 直接在整个 openwrt 目录下查找，只要存在这个文件夹就算成功
           if [ -n "$(find openwrt/ -name "luci-app-passwall" -type d)" ]; then
             echo "✅ Passwall LuCI 已找到"
           else
             echo "❌ 严重错误：未找到 Passwall 模块！"
-            # 打印当前目录结构以便排查
             find openwrt/ -name "luci-app-passwall"
             exit 1
           fi
@@ -51,25 +50,26 @@ jobs:
             echo "❌ 严重错误：未找到 EasyTier 模块！"
             exit 1
           fi
+
       - name: Cache Downloads & Build
         uses: actions/cache@v4
         with:
           path: |
             openwrt/dl
             openwrt/build_dir
-          # 在 key 的末尾加上 -v2，强制刷新缓存
-          key: imm-jcg-q30-build-v2-${{ hashFiles('.github/workflows/*.yml') }}
+          # 修改为 v3，确保不与之前原厂小分区的编译缓存混淆，强制生成干净的大分区环境
+          key: imm-jcg-q30-ubootmod-build-v3-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            imm-jcg-q30-build-v2-
+            imm-jcg-q30-ubootmod-build-v3-
 
       - name: Configure Firmware
         run: |
           cd openwrt
           
-          # 目标配置
+          # 目标配置 (关键点：已修改为大分区 ubootmod 专属机型)
           echo "CONFIG_TARGET_mediatek=y" >> .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jcg_q30-pro=y" >> .config
+          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jcg_q30-pro-ubootmod=y" >> .config
           
           # 核心功能与补丁
           echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
@@ -109,7 +109,6 @@ jobs:
       - name: Compile Firmware
         run: |
           cd openwrt
-          # 策略：前置检查内存，若内存过低则使用单线程以防 OOM
           make -j4 || make -j1 V=s
 
       - name: Post-Build Verify & Prepare Upload
@@ -119,12 +118,11 @@ jobs:
           echo "=== 当前目录所有文件 ==="
           ls -lah
           
-          # 1. 精确查找 sysupgrade 固件 (注意后缀改成了 .itb)
+          # 1. 精确查找 sysupgrade 固件
           FIRMWARE=$(ls -1 *-squashfs-sysupgrade.itb 2>/dev/null | head -n1)
           
           if [ -z "$FIRMWARE" ]; then
             echo "❌ 致命错误: 未找到 squashfs-sysupgrade.itb!"
-            echo "请检查上方 ls 输出，确认固件实际文件名"
             exit 1
           fi
           
@@ -136,15 +134,14 @@ jobs:
             exit 1
           fi
           
-          # 2. 生成校验和 (针对 .itb 生成)
+          # 2. 生成校验和
           sha256sum *.itb > sha256sums.txt
           echo "✅ 固件校验通过，准备上传"
 
-      # 3. 修复了缩进！注意这里的 - name 必须与上面的 - name 对齐
       - name: Upload Firmware
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-jcg-q30-pro
+          name: openwrt-jcg-q30-pro-ubootmod
           path: |
             openwrt/bin/targets/mediatek/filogic/*-squashfs-sysupgrade.itb
             openwrt/bin/targets/mediatek/filogic/sha256sums.txt
