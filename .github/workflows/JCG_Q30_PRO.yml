@@ -69,7 +69,8 @@ jobs:
           # 目标配置 (关键点：已修改为大分区 ubootmod 专属机型)
           echo "CONFIG_TARGET_mediatek=y" >> .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jcg_q30-pro-ubootmod=y" >> .config
+          echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-ubootmod=y" >> .config
+          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jcg_q30-ubootmod=y" >> .config
           
           # 核心功能与补丁
           echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
