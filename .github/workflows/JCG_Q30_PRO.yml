@@ -60,7 +60,7 @@ jobs:
           # 修改为 v3，确保不与之前原厂小分区的编译缓存混淆，强制生成干净的大分区环境
           key: imm-jcg-q30-ubootmod-build-v3-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            imm-jcg-q30-ubootmod-build-v3-
+            imm-jcg-q30-ubootmod-build-v4-
 
       - name: Configure Firmware
         run: |
@@ -106,7 +106,14 @@ jobs:
               exit 1
             fi
           done
-
+      - name: Clean Build
+        run: |
+          cd openwrt
+          # make clean: 清除编译产生的目标文件，但保留配置和依赖
+          # make dirclean: 彻底清除 build_dir 和 staging_dir，这是解决各种疑难杂症最彻底的方法
+          make dirclean
+          # 额外保险：确保 build_dir 彻底删除
+          rm -rf build_dir/
       - name: Compile Firmware
         run: |
           cd openwrt
