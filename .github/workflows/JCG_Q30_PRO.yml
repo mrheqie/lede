@@ -69,7 +69,24 @@ jobs:
           # 目标配置 (关键点：已修改为大分区 ubootmod 专属机型)
           echo "CONFIG_TARGET_mediatek=y" >> .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30_pro=y" >> .config
+          # 2. 跑一遍默认配置，让 OpenWrt 生成包含所有支持设备的完整清单
+          make defconfig
+          
+          # 3. 动态抓取正确的 JCG Q30 PRO 变量名 (正则表达式匹配)
+          JCG_VAR=$(grep -o 'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30[a-zA-Z0-9_-]*' .config | head -n1)
+          
+          if [ -z "$JCG_VAR" ]; then
+            echo "❌ 致命错误：源码中完全没有找到 JCG Q30 的配置项！"
+            exit 1
+          fi
+          
+          echo "✅ 成功抓取到正确的设备变量名: $JCG_VAR"
+          
+          # 4. 禁用默认的 openwrt_one (节约编译时间)
+          sed -i 's/CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_openwrt_one=y/# CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_openwrt_one is not set/g' .config
+          
+          # 5. 强行启用我们的 JCG Q30 PRO
+          echo "${JCG_VAR}=y" >> .config
           
           # 核心功能与补丁
           echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
