@@ -69,7 +69,7 @@ jobs:
           # 目标配置 (关键点：已修改为大分区 ubootmod 专属机型)
           echo "CONFIG_TARGET_mediatek=y" >> .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro=y" >> .config
+          echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30_pro=y" >> .config
           
           # 核心功能与补丁
           echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
@@ -125,11 +125,11 @@ jobs:
           echo "=== 当前目录所有文件 ==="
           ls -lah
           
-          # 1. 精确查找 sysupgrade 固件
-          FIRMWARE=$(ls -1 *-squashfs-sysupgrade.itb 2>/dev/null | head -n1)
+          # 【关键修复】：文件名匹配加上 jcg_q30 关键字，拒绝盲目抓取第一个 itb
+          FIRMWARE=$(ls -1 *jcg_q30*squashfs-sysupgrade.itb 2>/dev/null | head -n1)
           
           if [ -z "$FIRMWARE" ]; then
-            echo "❌ 致命错误: 未找到 squashfs-sysupgrade.itb!"
+            echo "❌ 致命错误: 未找到 JCG Q30 PRO 专属固件!"
             exit 1
           fi
           
@@ -141,8 +141,8 @@ jobs:
             exit 1
           fi
           
-          # 2. 生成校验和
-          sha256sum *.itb > sha256sums.txt
+          # 生成校验和
+          sha256sum *jcg_q30*.itb > sha256sums.txt
           echo "✅ 固件校验通过，准备上传"
 
       - name: Upload Firmware
