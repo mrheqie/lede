@@ -71,16 +71,17 @@ jobs:
           
           echo "=== 🕵️ 开始智能解析设备架构树 ==="
           
-          # 1. 抓取 Q30 PRO（强制匹配带有 pro 的字眼，防止误伤普通版）
-          JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*jcg_q30_pro[a-zA-Z0-9_]*' tmp/.config-target.in | head -n1)
+          # 1. 抓取 Q30 PRO 
+          # 终极修复：放弃严苛正则，直接搜索含有 q30 的配置行，利用 awk 提取完整第二列（完美兼容短横线）
+          JCG_VAR=$(grep -E '^config TARGET_DEVICE_.*q30' tmp/.config-target.in | grep -i 'pro' | awk '{print $2}' | head -n1)
           
-          # 退避策略：如果源码真的去掉了 pro 甚至换了名字，再做宽泛匹配
+          # 退避策略：如果真的连 pro 都没有，尝试抓取基础版 q30
           if [ -z "$JCG_VAR" ]; then
-            JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*jcg_q30[a-zA-Z0-9_]*' tmp/.config-target.in | grep -i "pro" | head -n1)
+            JCG_VAR=$(grep -E '^config TARGET_DEVICE_.*q30' tmp/.config-target.in | awk '{print $2}' | head -n1)
           fi
           
           if [ -z "$JCG_VAR" ]; then
-            echo "❌ 致命错误：在源码列表中完全找不到 JCG Q30 PRO！"
+            echo "❌ 致命错误：在源码列表中完全找不到包含 q30 的设备！"
             exit 1
           fi
           
@@ -93,9 +94,8 @@ jobs:
           echo "🎯 自动推导 Target: CONFIG_${TARGET_VAR}"
           echo "🎯 自动推导 Subtarget: CONFIG_${SUBTARGET_VAR}"
           
-          # ==== 💥 核心修复位置 💥 ====
-          # 必须彻底删除刚刚生成的包含了 x86 默认架构的旧配置文件！
-          # 否则我们追加在尾部的架构信息会被系统判定为"冲突重写(override)"并抛弃！
+          # ==== 核心重置 ====
+          # 彻底清除带有 x86 的默认配置，防止 override 报错
           rm -f .config
           touch .config
           
@@ -116,7 +116,7 @@ jobs:
           echo "CONFIG_PACKAGE_kmod-tun=y" >> .config
           echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
           
-          # 生成初步依赖树 (这次是基于联发科架构彻底展开的，绝对不会报 override 警告了！)
+          # 生成初步依赖树 
           make defconfig
           
           # 6. 自动禁用其他被默认勾选的设备
