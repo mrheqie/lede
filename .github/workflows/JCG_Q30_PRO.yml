@@ -51,44 +51,36 @@ jobs:
             exit 1
           fi
 
-      - name: Cache Downloads & Build
+      - name: Cache Downloads
         uses: actions/cache@v4
         with:
-          path: |
-            openwrt/dl
-            openwrt/build_dir
-          # 修改为 v3，确保不与之前原厂小分区的编译缓存混淆，强制生成干净的大分区环境
-          key: imm-jcg-q30-ubootmod-build-v3-${{ hashFiles('.github/workflows/*.yml') }}
+          # 仅缓存 dl 目录 (源码包)，不要缓存 build_dir，因为 Github Actions 缓存限制 10GB 容易爆，且跨版本容易报错
+          path: openwrt/dl
+          key: imm-jcg-q30-ubootmod-dl-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            imm-jcg-q30-ubootmod-build-v4-
+            imm-jcg-q30-ubootmod-dl-
 
       - name: Configure Firmware
         run: |
           cd openwrt
           
-          # 目标配置 (关键点：已修改为大分区 ubootmod 专属机型)
+          # 清理旧配置确保纯净
+          rm -f .config
+          
+          # 1. 基础架构设定
           echo "CONFIG_TARGET_mediatek=y" >> .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          # 2. 跑一遍默认配置，让 OpenWrt 生成包含所有支持设备的完整清单
-          make defconfig
           
-          # 3. 动态抓取正确的 JCG Q30 PRO 变量名 (正则表达式匹配)
-          JCG_VAR=$(grep -o 'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30[a-zA-Z0-9_-]*' .config | head -n1)
+          # 2. 【核心修复】开启多设备编译支持（防止被默认配置强制覆盖）
+          echo "CONFIG_TARGET_MULTI_PROFILE=y" >> .config
           
-          if [ -z "$JCG_VAR" ]; then
-            echo "❌ 致命错误：源码中完全没有找到 JCG Q30 的配置项！"
-            exit 1
-          fi
+          # 3. 【核心修复】明确选中 JCG Q30 PRO (这里必须用下划线)
+          echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30_pro=y" >> .config
           
-          echo "✅ 成功抓取到正确的设备变量名: $JCG_VAR"
+          # 4. 【核心修复】显式禁用默认的 openwrt_one
+          echo "# CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_openwrt_one is not set" >> .config
           
-          # 4. 禁用默认的 openwrt_one (节约编译时间)
-          sed -i 's/CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_openwrt_one=y/# CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_openwrt_one is not set/g' .config
-          
-          # 5. 强行启用我们的 JCG Q30 PRO
-          echo "${JCG_VAR}=y" >> .config
-          
-          # 核心功能与补丁
+          # 5. 核心功能与补丁
           echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y" >> .config
@@ -97,9 +89,10 @@ jobs:
           echo "CONFIG_PACKAGE_kmod-tun=y" >> .config
           echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
           
+          # 生成初步依赖树
           make defconfig
           
-          # 深度精简 (前后端包一网打尽)
+          # 6. 深度精简 (前后端包一网打尽)
           PLUGINS_TO_REMOVE=(
             "luci-app-aria2" "aria2" "luci-app-transmission" "transmission-daemon" "transmission-web"
             "luci-app-qbittorrent" "qbittorrent" "luci-app-samba4" "samba4-server" "samba4-libs"
@@ -113,6 +106,7 @@ jobs:
             echo "CONFIG_PACKAGE_${pkg}=n" >> .config
           done
           
+          # 最终生成配置
           make defconfig
           
           # 验证精简生效
@@ -122,18 +116,37 @@ jobs:
               exit 1
             fi
           done
-      - name: Clean Build
+
+      - name: Verify Configuration (Fail-Fast)
         run: |
           cd openwrt
-          # make clean: 清除编译产生的目标文件，但保留配置和依赖
-          # make dirclean: 彻底清除 build_dir 和 staging_dir，这是解决各种疑难杂症最彻底的方法
-          make dirclean
-          # 额外保险：确保 build_dir 彻底删除
-          rm -rf build_dir/
+          echo "=== 正在进行编译前终极校验 ==="
+          
+          if ! grep -q "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30_pro=y" .config; then
+            echo "❌ 致命错误：.config 中未检测到 JCG Q30 PRO 的激活状态！"
+            echo "当前文件里实际被选中的设备是："
+            grep "CONFIG_TARGET_DEVICE_.*=y" .config || echo "(没有任何设备被选中)"
+            exit 1
+          fi
+          
+          if grep -q "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_openwrt_one=y" .config; then
+            echo "❌ 致命错误：openwrt_one 居然还活着！这会导致编译时间翻倍！"
+            exit 1
+          fi
+          
+          echo "✅ 校验完美通过！JCG Q30 PRO 专属配置已锁定，准备进入 3 小时熬鹰模式！🚀"
+
+      - name: Download package sources
+        run: |
+          cd openwrt
+          # 提前下载所有依赖，防止多线程编译时因网络问题崩溃
+          make download -j8 || make download -j1 V=s
+
       - name: Compile Firmware
         run: |
           cd openwrt
-          make -j4 || make -j1 V=s
+          # 使用 nproc 自动获取最佳线程数，如果失败则回退到单线程详细输出报错
+          make -j$(nproc) || make -j1 V=s
 
       - name: Post-Build Verify & Prepare Upload
         run: |
@@ -142,7 +155,7 @@ jobs:
           echo "=== 当前目录所有文件 ==="
           ls -lah
           
-          # 【关键修复】：文件名匹配加上 jcg_q30 关键字，拒绝盲目抓取第一个 itb
+          # 抓取包含 jcg_q30 的正确固件（这里匹配的是 filogic.mk 里的横杠命名）
           FIRMWARE=$(ls -1 *jcg_q30*squashfs-sysupgrade.itb 2>/dev/null | head -n1)
           
           if [ -z "$FIRMWARE" ]; then
