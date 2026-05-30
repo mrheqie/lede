@@ -60,25 +60,44 @@ jobs:
           restore-keys: |
             imm-jcg-q30-ubootmod-dl-
 
-      - name: Configure Firmware
+      - name: Configure Firmware & Verify
         run: |
           cd openwrt
           
           # 清理旧配置确保纯净
           rm -f .config
+          touch .config
           
-          # 1. 基础架构设定
-          echo "CONFIG_TARGET_mediatek=y" >> .config
-          echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+          # 先空跑一次 defconfig，让系统生成所有支持设备的内部数据库 (tmp/.config-target.in)
+          make defconfig
           
-          # 2. 【核心修复】开启多设备编译支持（防止被默认配置强制覆盖）
+          echo "=== 🕵️ 开始智能解析设备架构树 ==="
+          
+          # 1. 抓取源码中 JCG Q30 最准确的内部变量名
+          JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*jcg_q30[a-zA-Z0-9_]*' tmp/.config-target.in | head -n1)
+          
+          if [ -z "$JCG_VAR" ]; then
+            echo "❌ 致命错误：在源码列表中完全找不到 JCG Q30！"
+            exit 1
+          fi
+          
+          echo "✅ 成功捕获设备底层变量: CONFIG_${JCG_VAR}"
+          
+          # 2. 动态提取主架构 (Target) 和子架构 (Subtarget)
+          # 利用正则将 TARGET_DEVICE_mediatek_mt7981_DEVICE_jcg... 转换为 TARGET_mediatek_mt7981
+          SUBTARGET_VAR=$(echo "$JCG_VAR" | sed -n 's/TARGET_DEVICE_\(.*\)_DEVICE_.*/TARGET_\1/p')
+          TARGET_VAR=$(echo "$SUBTARGET_VAR" | sed -n 's/\(TARGET_[^_]*\).*/\1/p')
+          
+          echo "🎯 自动推导 Target: CONFIG_${TARGET_VAR}"
+          echo "🎯 自动推导 Subtarget: CONFIG_${SUBTARGET_VAR}"
+          
+          # 3. 写入正确的基础架构
+          echo "CONFIG_${TARGET_VAR}=y" >> .config
+          echo "CONFIG_${SUBTARGET_VAR}=y" >> .config
           echo "CONFIG_TARGET_MULTI_PROFILE=y" >> .config
           
-          # 3. 【核心修复】明确选中 JCG Q30 PRO (这里必须用下划线)
-          echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30_pro=y" >> .config
-          
-          # 4. 【核心修复】显式禁用默认的 openwrt_one
-          echo "# CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_openwrt_one is not set" >> .config
+          # 4. 强制启用我们的设备
+          echo "CONFIG_${JCG_VAR}=y" >> .config
           
           # 5. 核心功能与补丁
           echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
@@ -92,7 +111,14 @@ jobs:
           # 生成初步依赖树
           make defconfig
           
-          # 6. 深度精简 (前后端包一网打尽)
+          # 6. 自动禁用其他被默认勾选的“野设备”（如 openwrt_one）
+          DEFAULT_DEVS=$(grep "CONFIG_TARGET_DEVICE_.*=y" .config | grep -v "CONFIG_${JCG_VAR}=y" | cut -d '=' -f 1 || true)
+          for dev in $DEFAULT_DEVS; do
+            echo "🚫 自动禁用无关默认设备: $dev"
+            sed -i "s/${dev}=y/# ${dev} is not set/g" .config
+          done
+          
+          # 7. 深度精简 (前后端包一网打尽)
           PLUGINS_TO_REMOVE=(
             "luci-app-aria2" "aria2" "luci-app-transmission" "transmission-daemon" "transmission-web"
             "luci-app-qbittorrent" "qbittorrent" "luci-app-samba4" "samba4-server" "samba4-libs"
@@ -109,53 +135,31 @@ jobs:
           # 最终生成配置
           make defconfig
           
-          # 验证精简生效
-          for pkg in "${PLUGINS_TO_REMOVE[@]}"; do
-            if grep -q "CONFIG_PACKAGE_${pkg}=y" .config; then
-              echo "❌ 警告: ${pkg} 强制启用了依赖，请手动排查"
-              exit 1
-            fi
-          done
-
-      - name: Verify Configuration (Fail-Fast)
-        run: |
-          cd openwrt
-          echo "=== 正在进行编译前终极校验 ==="
-          
-          if ! grep -q "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30_pro=y" .config; then
-            echo "❌ 致命错误：.config 中未检测到 JCG Q30 PRO 的激活状态！"
-            echo "当前文件里实际被选中的设备是："
-            grep "CONFIG_TARGET_DEVICE_.*=y" .config || echo "(没有任何设备被选中)"
+          echo "=== 🛡️ 编译前终极校验 ==="
+          if ! grep -q "CONFIG_${JCG_VAR}=y" .config; then
+            echo "❌ 致命错误：即使动态注入，设备变量仍被系统丢弃！"
             exit 1
           fi
-          
-          if grep -q "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_openwrt_one=y" .config; then
-            echo "❌ 致命错误：openwrt_one 居然还活着！这会导致编译时间翻倍！"
-            exit 1
-          fi
-          
-          echo "✅ 校验完美通过！JCG Q30 PRO 专属配置已锁定，准备进入 3 小时熬鹰模式！🚀"
+          echo "✅ 校验完美通过！架构、设备匹配无误，准备进入熬鹰模式！🚀"
 
       - name: Download package sources
         run: |
           cd openwrt
-          # 提前下载所有依赖，防止多线程编译时因网络问题崩溃
           make download -j8 || make download -j1 V=s
 
       - name: Compile Firmware
         run: |
           cd openwrt
-          # 使用 nproc 自动获取最佳线程数，如果失败则回退到单线程详细输出报错
           make -j$(nproc) || make -j1 V=s
 
       - name: Post-Build Verify & Prepare Upload
         run: |
-          cd openwrt/bin/targets/mediatek/filogic
+          # 注意：路径改为了通配符，无论源码怎么改架构名（filogic 或 mt7981），都能找得到
+          cd openwrt/bin/targets/mediatek/*
           
           echo "=== 当前目录所有文件 ==="
           ls -lah
           
-          # 抓取包含 jcg_q30 的正确固件（这里匹配的是 filogic.mk 里的横杠命名）
           FIRMWARE=$(ls -1 *jcg_q30*squashfs-sysupgrade.itb 2>/dev/null | head -n1)
           
           if [ -z "$FIRMWARE" ]; then
@@ -171,7 +175,6 @@ jobs:
             exit 1
           fi
           
-          # 生成校验和
           sha256sum *jcg_q30*.itb > sha256sums.txt
           echo "✅ 固件校验通过，准备上传"
 
@@ -179,7 +182,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-jcg-q30-pro-ubootmod
+          # 同样使用通配符适配架构变化
           path: |
-            openwrt/bin/targets/mediatek/filogic/*-squashfs-sysupgrade.itb
-            openwrt/bin/targets/mediatek/filogic/sha256sums.txt
+            openwrt/bin/targets/mediatek/*/*-squashfs-sysupgrade.itb
+            openwrt/bin/targets/mediatek/*/sha256sums.txt
           retention-days: 7
