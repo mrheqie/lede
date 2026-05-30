@@ -64,34 +64,42 @@ jobs:
         run: |
           cd openwrt
           
-          # 清理旧配置确保纯净
+          # 第一阶段：空跑生成设备数据库
           rm -f .config
           touch .config
-          
-          # 先空跑一次 defconfig，让系统生成所有支持设备的内部数据库 (tmp/.config-target.in)
           make defconfig
           
           echo "=== 🕵️ 开始智能解析设备架构树 ==="
           
-          # 1. 抓取源码中 JCG Q30 最准确的内部变量名
-          JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*jcg_q30[a-zA-Z0-9_]*' tmp/.config-target.in | head -n1)
+          # 1. 抓取 Q30 PRO（强制匹配带有 pro 的字眼，防止误伤普通版）
+          JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*jcg_q30_pro[a-zA-Z0-9_]*' tmp/.config-target.in | head -n1)
+          
+          # 退避策略：如果源码真的去掉了 pro 甚至换了名字，再做宽泛匹配
+          if [ -z "$JCG_VAR" ]; then
+            JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*jcg_q30[a-zA-Z0-9_]*' tmp/.config-target.in | grep -i "pro" | head -n1)
+          fi
           
           if [ -z "$JCG_VAR" ]; then
-            echo "❌ 致命错误：在源码列表中完全找不到 JCG Q30！"
+            echo "❌ 致命错误：在源码列表中完全找不到 JCG Q30 PRO！"
             exit 1
           fi
           
           echo "✅ 成功捕获设备底层变量: CONFIG_${JCG_VAR}"
           
-          # 2. 动态提取主架构 (Target) 和子架构 (Subtarget)
-          # 利用正则将 TARGET_DEVICE_mediatek_mt7981_DEVICE_jcg... 转换为 TARGET_mediatek_mt7981
+          # 2. 提取 Target / Subtarget
           SUBTARGET_VAR=$(echo "$JCG_VAR" | sed -n 's/TARGET_DEVICE_\(.*\)_DEVICE_.*/TARGET_\1/p')
           TARGET_VAR=$(echo "$SUBTARGET_VAR" | sed -n 's/\(TARGET_[^_]*\).*/\1/p')
           
           echo "🎯 自动推导 Target: CONFIG_${TARGET_VAR}"
           echo "🎯 自动推导 Subtarget: CONFIG_${SUBTARGET_VAR}"
           
-          # 3. 写入正确的基础架构
+          # ==== 💥 核心修复位置 💥 ====
+          # 必须彻底删除刚刚生成的包含了 x86 默认架构的旧配置文件！
+          # 否则我们追加在尾部的架构信息会被系统判定为"冲突重写(override)"并抛弃！
+          rm -f .config
+          touch .config
+          
+          # 3. 在一张白纸上写入纯净的基础架构
           echo "CONFIG_${TARGET_VAR}=y" >> .config
           echo "CONFIG_${SUBTARGET_VAR}=y" >> .config
           echo "CONFIG_TARGET_MULTI_PROFILE=y" >> .config
@@ -108,17 +116,17 @@ jobs:
           echo "CONFIG_PACKAGE_kmod-tun=y" >> .config
           echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
           
-          # 生成初步依赖树
+          # 生成初步依赖树 (这次是基于联发科架构彻底展开的，绝对不会报 override 警告了！)
           make defconfig
           
-          # 6. 自动禁用其他被默认勾选的“野设备”（如 openwrt_one）
+          # 6. 自动禁用其他被默认勾选的设备
           DEFAULT_DEVS=$(grep "CONFIG_TARGET_DEVICE_.*=y" .config | grep -v "CONFIG_${JCG_VAR}=y" | cut -d '=' -f 1 || true)
           for dev in $DEFAULT_DEVS; do
             echo "🚫 自动禁用无关默认设备: $dev"
             sed -i "s/${dev}=y/# ${dev} is not set/g" .config
           done
           
-          # 7. 深度精简 (前后端包一网打尽)
+          # 7. 深度精简
           PLUGINS_TO_REMOVE=(
             "luci-app-aria2" "aria2" "luci-app-transmission" "transmission-daemon" "transmission-web"
             "luci-app-qbittorrent" "qbittorrent" "luci-app-samba4" "samba4-server" "samba4-libs"
