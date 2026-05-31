@@ -12,26 +12,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Environment
+      - name: Hardcore Free Disk Space & Setup Environment
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          # 1. 极其激进地删除无用的大型预装软件和目录（榨出最大空间）
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift /home/runneradmin/.dotnet
+          sudo apt-get -y purge azure-cli* docker* ghc* zulu* llvm* firefox google* openjdk* dotnet* powershell mono-devel mysql*
           sudo docker image prune --all --force
+          
+          # 2. 更新系统并安装 OpenWrt 编译依赖
           sudo -E apt-get -qq update
           sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache clang cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+          
+          # 3. 清理残余缓存并设置时区
           sudo -E apt-get -qq autoremove --purge
           sudo -E apt-get -qq clean
           sudo timedatectl set-timezone "Asia/Shanghai"
-      - name: Free Disk Space (Ubuntu)
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force
-          sudo apt-get clean
+          
+          # 4. 打印当前磁盘剩余空间（供你在 Actions 日志里检查成果）
+          echo "==== 剩余可用空间 ===="
           df -h
+
       - name: Prepare Source
         run: |
           git config --global credential.helper ""
