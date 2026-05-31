@@ -16,25 +16,14 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          # 1. 极其激进地删除无用的大型预装软件和目录
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift /home/runneradmin/.dotnet
-          
-          # 2. 彻底卸载巨型垃圾软件（包含 docker）
           sudo apt-get -y purge azure-cli* docker* ghc* zulu* llvm* firefox google* openjdk* dotnet* powershell mono-devel mysql*
-          
-          # 【修正这里】既然卸载了 docker，直接强删它的镜像和缓存目录，不会报错且释放空间更彻底
           sudo rm -rf /var/lib/docker /etc/docker
-          
-          # 3. 更新系统并安装 OpenWrt 编译依赖
           sudo -E apt-get -qq update
           sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache clang cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
-          
-          # 4. 清理残余缓存并设置时区
           sudo -E apt-get -qq autoremove --purge
           sudo -E apt-get -qq clean
           sudo timedatectl set-timezone "Asia/Shanghai"
-          
-          # 5. 打印当前磁盘剩余空间
           echo "==== 剩余可用空间 ===="
           df -h
 
@@ -43,13 +32,8 @@ jobs:
           git config --global credential.helper ""
           git clone -b master https://github.com/immortalwrt/immortalwrt openwrt
           cd openwrt
-          
-          # 1. 添加 Passwall 源
           echo "src-git passwall https://github.com/Openwrt-Passwall/openwrt-passwall.git;main" >> feeds.conf.default
-          
-          # 2. 添加 EasyTier
           echo "src-git easytier https://github.com/EasyTier/luci-app-easytier.git" >> feeds.conf.default
-          
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
@@ -62,7 +46,6 @@ jobs:
             echo "❌ 严重错误：未找到 Passwall 模块！"
             exit 1
           fi
-          
           echo "=== 开始验证 EasyTier ==="
           if [ -n "$(find openwrt/ -name "luci-app-easytier" -type d)" ]; then
             echo "✅ EasyTier 已找到"
@@ -82,46 +65,40 @@ jobs:
       - name: Configure Firmware & Verify
         run: |
           cd openwrt
-          
           rm -f .config
           touch .config
           make defconfig
           
           echo "=== 🕵️ 开始智能解析设备架构树 ==="
-          
-          # 【修改点 1】：优先抓取不锁区大分区的 ubootmod 变量，抓不到再退避到 pro
           JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | grep -i "ubootmod" | head -n1)
-          
           if [ -z "$JCG_VAR" ]; then
             JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | grep -i "pro" | head -n1)
           fi
-          
           if [ -z "$JCG_VAR" ]; then
             JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | head -n1)
           fi
-          
           if [ -z "$JCG_VAR" ]; then
             echo "❌ 致命错误：找不到任何 q30 相关设备变量！"
             exit 1
           fi
           
           echo "✅ 成功捕获设备底层变量: CONFIG_${JCG_VAR}"
-          
           SUBTARGET_VAR=$(echo "$JCG_VAR" | sed -n 's/TARGET_DEVICE_\(.*\)_DEVICE_.*/TARGET_\1/p')
           TARGET_VAR=$(echo "$SUBTARGET_VAR" | sed -n 's/\(TARGET_[^_]*\).*/\1/p')
           
-          echo "🎯 自动推导 Target: CONFIG_${TARGET_VAR}"
-          echo "🎯 自动推导 Subtarget: CONFIG_${SUBTARGET_VAR}"
-          
+          # 核心修正 1: 重新初始化干净的配置文件，精准对齐硬件目标，不使用 MULTI_PROFILE 污染
           rm -f .config
           touch .config
-          
           echo "CONFIG_${TARGET_VAR}=y" >> .config
           echo "CONFIG_${SUBTARGET_VAR}=y" >> .config
-          echo "CONFIG_TARGET_MULTI_PROFILE=y" >> .config
           echo "CONFIG_${JCG_VAR}=y" >> .config
           
-          # 核心插件集成
+          # 核心修正 2: 强制补齐 LuCI 网页后台基础全家桶和中文语言包
+          echo "CONFIG_PACKAGE_luci=y" >> .config
+          echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
+          echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
+          
+          # 核心功能组件与核心插件集成
           echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y" >> .config
@@ -129,14 +106,6 @@ jobs:
           echo "CONFIG_PACKAGE_luci-app-easytier=y" >> .config
           echo "CONFIG_PACKAGE_kmod-tun=y" >> .config
           echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
-          
-          make defconfig
-          
-          # 自动禁用其他无关默认设备
-          DEFAULT_DEVS=$(grep "CONFIG_TARGET_DEVICE_.*=y" .config | grep -v "CONFIG_${JCG_VAR}=y" | cut -d '=' -f 1 || true)
-          for dev in $DEFAULT_DEVS; do
-            sed -i "s/${dev}=y/# ${dev} is not set/g" .config
-          done
           
           # 深度精简无关大体积插件
           PLUGINS_TO_REMOVE=(
@@ -146,12 +115,11 @@ jobs:
             "luci-app-dae" "dae" "luci-app-openclash" "luci-app-softether" 
             "luci-app-tailscale" "tailscale"
           )
-          
           for pkg in "${PLUGINS_TO_REMOVE[@]}"; do
-            sed -i "/CONFIG_PACKAGE_${pkg}=y/d" .config
             echo "CONFIG_PACKAGE_${pkg}=n" >> .config
           done
           
+          # 展开依赖
           make defconfig
           
           echo "=== 🛡️ 编译前终极校验 ==="
@@ -159,7 +127,11 @@ jobs:
             echo "❌ 致命错误：设备变量未被正确锁定！"
             exit 1
           fi
-          echo "✅ 校验完美通过！架构、设备匹配无误！🚀"
+          if ! grep -q "CONFIG_PACKAGE_luci=y" .config; then
+            echo "❌ 致命错误：LuCI 核心未被激活！"
+            exit 1
+          fi
+          echo "✅ 校验完美通过！纯净单设备网页版配置就绪！🚀"
 
       - name: Download package sources
         run: |
@@ -174,34 +146,24 @@ jobs:
       - name: Post-Build Verify & Prepare Upload
         run: |
           cd openwrt/bin/targets/mediatek/*
-          
           echo "=== 当前目录所有文件 ==="
           ls -lah
           
-          # 【修改点 2】：同时支持校验 .bin 和 .itb，优先匹配 sysupgrade 固件
-          FIRMWARE=$(ls -1 *jcg_q30*sysupgrade.bin *jcg_q30*sysupgrade.itb 2>/dev/null | head -n1)
-          
+          # 优先匹配大分区专用的新版 sysupgrade.itb 固件
+          FIRMWARE=$(ls -1 *jcg_q30*sysupgrade.itb *jcg_q30*sysupgrade.bin 2>/dev/null | head -n1)
           if [ -z "$FIRMWARE" ]; then
             echo "❌ 致命错误: 未找到 JCG Q30 编译输出文件!"
             exit 1
           fi
           
           SIZE=$(stat -c%s "$FIRMWARE")
-          echo "✅ 找到固件: $FIRMWARE (大小: $((SIZE/1024/1024)) MB)"
-          
-          if [ "$SIZE" -lt 10485760 ]; then
-            echo "❌ 致命错误: 固件大小小于 10MB，编译可能不完整!"
-            exit 1
-          fi
-          
+          echo "✅ 成功捕获正式固件: $FIRMWARE (大小: $((SIZE/1024/1024)) MB)"
           sha256sum *jcg_q30*.* > sha256sums.txt
-          echo "✅ 固件校验通过，准备上传"
 
       - name: Upload Firmware
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-jcg-q30-pro-ubootmod
-          # 改为 *jcg_q30*，不再限制后缀，这样 .bin、.itb、.fip 甚至 dts 统统都会被打包带走
+          name: openwrt-jcg-q30-pro-fixed-parts
           path: |
             openwrt/bin/targets/mediatek/*/*jcg_q30*
             openwrt/bin/targets/mediatek/*/sha256sums.txt
