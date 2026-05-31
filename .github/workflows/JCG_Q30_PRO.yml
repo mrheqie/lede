@@ -201,9 +201,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-jcg-q30-pro-ubootmod
-          # 【修改点 3】：将上传路径后缀由单纯的 .itb 改为通配符，确保同时打包 factory.bin 和 sysupgrade.bin
+          # 改为 *jcg_q30*，不再限制后缀，这样 .bin、.itb、.fip 甚至 dts 统统都会被打包带走
           path: |
-            openwrt/bin/targets/mediatek/*/*jcg_q30*.bin
-            openwrt/bin/targets/mediatek/*/*jcg_q30*.itb
+            openwrt/bin/targets/mediatek/*/*jcg_q30*
             openwrt/bin/targets/mediatek/*/sha256sums.txt
           retention-days: 7
