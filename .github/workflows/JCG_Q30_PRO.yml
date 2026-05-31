@@ -30,7 +30,7 @@ jobs:
           git clone -b master https://github.com/immortalwrt/immortalwrt openwrt
           cd openwrt
           
-          # 1. 仅添加一次 Passwall 源，因为它包含所有内容
+          # 1. 添加 Passwall 源
           echo "src-git passwall https://github.com/Openwrt-Passwall/openwrt-passwall.git;main" >> feeds.conf.default
           
           # 2. 添加 EasyTier
@@ -46,7 +46,6 @@ jobs:
             echo "✅ Passwall LuCI 已找到"
           else
             echo "❌ 严重错误：未找到 Passwall 模块！"
-            find openwrt/ -name "luci-app-passwall"
             exit 1
           fi
           
@@ -61,7 +60,6 @@ jobs:
       - name: Cache Downloads
         uses: actions/cache@v4
         with:
-          # 仅缓存 dl 目录 (源码包)，不要缓存 build_dir，因为 Github Actions 缓存限制 10GB 容易爆，且跨版本容易报错
           path: openwrt/dl
           key: imm-jcg-q30-ubootmod-dl-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
@@ -71,50 +69,45 @@ jobs:
         run: |
           cd openwrt
           
-          # 第一阶段：空跑生成设备数据库
           rm -f .config
           touch .config
           make defconfig
           
           echo "=== 🕵️ 开始智能解析设备架构树 ==="
           
-          # 1. 抓取 Q30 PRO
-          # 终极正则：允许包含字母、数字、下划线(_)和短横线(-)
-          JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | grep -i "pro" | head -n1)
+          # 【修改点 1】：优先抓取不锁区大分区的 ubootmod 变量，抓不到再退避到 pro
+          JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | grep -i "ubootmod" | head -n1)
           
-          # 退避策略：如果连 pro 都没有，尝试抓取基础版 q30
+          if [ -z "$JCG_VAR" ]; then
+            JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | grep -i "pro" | head -n1)
+          fi
+          
           if [ -z "$JCG_VAR" ]; then
             JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | head -n1)
           fi
           
           if [ -z "$JCG_VAR" ]; then
-            echo "❌ 致命错误：即使放宽正则，依然找不到 q30 设备，请检查源码是否正确包含该机型！"
+            echo "❌ 致命错误：找不到任何 q30 相关设备变量！"
             exit 1
           fi
           
           echo "✅ 成功捕获设备底层变量: CONFIG_${JCG_VAR}"
           
-          # 2. 提取 Target / Subtarget
           SUBTARGET_VAR=$(echo "$JCG_VAR" | sed -n 's/TARGET_DEVICE_\(.*\)_DEVICE_.*/TARGET_\1/p')
           TARGET_VAR=$(echo "$SUBTARGET_VAR" | sed -n 's/\(TARGET_[^_]*\).*/\1/p')
           
           echo "🎯 自动推导 Target: CONFIG_${TARGET_VAR}"
           echo "🎯 自动推导 Subtarget: CONFIG_${SUBTARGET_VAR}"
           
-          # ==== 核心重置 ====
-          # 彻底清除带有 x86 的默认配置，防止 override 报错
           rm -f .config
           touch .config
           
-          # 3. 在一张白纸上写入纯净的基础架构
           echo "CONFIG_${TARGET_VAR}=y" >> .config
           echo "CONFIG_${SUBTARGET_VAR}=y" >> .config
           echo "CONFIG_TARGET_MULTI_PROFILE=y" >> .config
-          
-          # 4. 强制启用我们的设备
           echo "CONFIG_${JCG_VAR}=y" >> .config
           
-          # 5. 核心功能与补丁
+          # 核心插件集成
           echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y" >> .config
@@ -123,17 +116,15 @@ jobs:
           echo "CONFIG_PACKAGE_kmod-tun=y" >> .config
           echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
           
-          # 生成初步依赖树 
           make defconfig
           
-          # 6. 自动禁用其他被默认勾选的设备
+          # 自动禁用其他无关默认设备
           DEFAULT_DEVS=$(grep "CONFIG_TARGET_DEVICE_.*=y" .config | grep -v "CONFIG_${JCG_VAR}=y" | cut -d '=' -f 1 || true)
           for dev in $DEFAULT_DEVS; do
-            echo "🚫 自动禁用无关默认设备: $dev"
             sed -i "s/${dev}=y/# ${dev} is not set/g" .config
           done
           
-          # 7. 深度精简
+          # 深度精简无关大体积插件
           PLUGINS_TO_REMOVE=(
             "luci-app-aria2" "aria2" "luci-app-transmission" "transmission-daemon" "transmission-web"
             "luci-app-qbittorrent" "qbittorrent" "luci-app-samba4" "samba4-server" "samba4-libs"
@@ -147,15 +138,14 @@ jobs:
             echo "CONFIG_PACKAGE_${pkg}=n" >> .config
           done
           
-          # 最终生成配置
           make defconfig
           
           echo "=== 🛡️ 编译前终极校验 ==="
           if ! grep -q "CONFIG_${JCG_VAR}=y" .config; then
-            echo "❌ 致命错误：即使动态注入，设备变量仍被系统丢弃！"
+            echo "❌ 致命错误：设备变量未被正确锁定！"
             exit 1
           fi
-          echo "✅ 校验完美通过！架构、设备匹配无误，准备进入熬鹰模式！🚀"
+          echo "✅ 校验完美通过！架构、设备匹配无误！🚀"
 
       - name: Download package sources
         run: |
@@ -169,16 +159,16 @@ jobs:
 
       - name: Post-Build Verify & Prepare Upload
         run: |
-          # 注意：路径改为了通配符，无论源码怎么改架构名（filogic 或 mt7981），都能找得到
           cd openwrt/bin/targets/mediatek/*
           
           echo "=== 当前目录所有文件 ==="
           ls -lah
           
-          FIRMWARE=$(ls -1 *jcg_q30*squashfs-sysupgrade.itb 2>/dev/null | head -n1)
+          # 【修改点 2】：同时支持校验 .bin 和 .itb，优先匹配 sysupgrade 固件
+          FIRMWARE=$(ls -1 *jcg_q30*sysupgrade.bin *jcg_q30*sysupgrade.itb 2>/dev/null | head -n1)
           
           if [ -z "$FIRMWARE" ]; then
-            echo "❌ 致命错误: 未找到 JCG Q30 PRO 专属固件!"
+            echo "❌ 致命错误: 未找到 JCG Q30 编译输出文件!"
             exit 1
           fi
           
@@ -186,19 +176,20 @@ jobs:
           echo "✅ 找到固件: $FIRMWARE (大小: $((SIZE/1024/1024)) MB)"
           
           if [ "$SIZE" -lt 10485760 ]; then
-            echo "❌ 致命错误: 固件大小小于 10MB，这不是完整固件!"
+            echo "❌ 致命错误: 固件大小小于 10MB，编译可能不完整!"
             exit 1
           fi
           
-          sha256sum *jcg_q30*.itb > sha256sums.txt
+          sha256sum *jcg_q30*.* > sha256sums.txt
           echo "✅ 固件校验通过，准备上传"
 
       - name: Upload Firmware
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-jcg-q30-pro-ubootmod
-          # 同样使用通配符适配架构变化
+          # 【修改点 3】：将上传路径后缀由单纯的 .itb 改为通配符，确保同时打包 factory.bin 和 sysupgrade.bin
           path: |
-            openwrt/bin/targets/mediatek/*/*-squashfs-sysupgrade.itb
+            openwrt/bin/targets/mediatek/*/*jcg_q30*.bin
+            openwrt/bin/targets/mediatek/*/*jcg_q30*.itb
             openwrt/bin/targets/mediatek/*/sha256sums.txt
           retention-days: 7
