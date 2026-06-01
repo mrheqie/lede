@@ -66,31 +66,44 @@ jobs:
         run: |
           cd openwrt
           
-          # 1. 彻底清空并初始化干净的配置文件
-          rm -f .config
-          touch .config
+          # 1. 运行 defconfig 生成基础的 tmp/.config-target.in
+          make defconfig
           
-          # 2. 核心修正：直接注入 JCG Q30 Pro 的主线大分区（ubootmod / fixed-parts）核心架构变量
-          # 这样能确保不引入跨机型驱动污染，体积最小，分区最精准
-          echo "CONFIG_TARGET_mediatek=y" >> .config
-          echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro=y" >> .config
+          echo "=== 🕵️ 开始精准锁定设备变量 ==="
+          # 从生成的 target 列表中搜索 Q30 Pro，保证变量名 100% 正确
+          # 假设变量名包含 jcg_q30-pro
+          JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | grep "q30-pro" | head -n1)
           
-          # 3. 强制补齐 LuCI 网页后台基础全家桶和中文语言包（解决没有网页界面的问题）
-          echo "CONFIG_PACKAGE_luci=y" >> .config
-          echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
-          echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
+          if [ -z "$JCG_VAR" ]; then
+            echo "❌ 致命错误：在 tmp/.config-target.in 中找不到 JCG Q30 Pro 的目标变量！"
+            exit 1
+          fi
           
-          # 4. 核心功能组件与核心插件集成
-          echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y" >> .config
-          echo "CONFIG_PACKAGE_geoview=y" >> .config 
-          echo "CONFIG_PACKAGE_luci-app-easytier=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-tun=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
+          echo "✅ 成功锁定设备变量: CONFIG_${JCG_VAR}"
           
-          # 5. 深度精简无关大体积插件，防止固件臃肿
+          # 2. 生成一份全新的、干净的 .config
+          # 使用 heredoc 方式写入，避免追加带来的冲突
+          cat > .config <<EOF
+          CONFIG_TARGET_mediatek=y
+          CONFIG_TARGET_mediatek_filogic=y
+          CONFIG_${JCG_VAR}=y
+          CONFIG_TARGET_MULTI_PROFILE=n
+          CONFIG_PACKAGE_luci=y
+          CONFIG_LUCI_LANG_zh_Hans=y
+          CONFIG_PACKAGE_luci-theme-bootstrap=y
+          CONFIG_PACKAGE_luci-app-passwall=y
+          CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y
+          CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y
+          CONFIG_PACKAGE_geoview=y
+          CONFIG_PACKAGE_luci-app-easytier=y
+          CONFIG_PACKAGE_kmod-tun=y
+          CONFIG_PACKAGE_kmod-nft-fullcone=y
+          EOF
+          
+          # 3. 运行 defconfig 来解析并填补依赖项 (这一步最关键，它会基于我们刚才写的 .config 补全必要的内核选项)
+          make defconfig
+          
+          # 4. 精简不需要的插件
           PLUGINS_TO_REMOVE=(
             "luci-app-aria2" "aria2" "luci-app-transmission" "transmission-daemon" "transmission-web"
             "luci-app-qbittorrent" "qbittorrent" "luci-app-samba4" "samba4-server" "samba4-libs"
@@ -99,28 +112,29 @@ jobs:
             "luci-app-tailscale" "tailscale"
           )
           
-          # 先用 defconfig 展开依赖树，让默认设备的关联关系生成
-          make defconfig
-          
-          # 强行将精简列表里的插件和默认带的其他无关机型全部关闭
           for pkg in "${PLUGINS_TO_REMOVE[@]}"; do
             sed -i "/CONFIG_PACKAGE_${pkg}=y/d" .config
             echo "CONFIG_PACKAGE_${pkg}=n" >> .config
           done
           
-          # 再次执行 defconfig 固化最终配置
+          # 最后再做一次 defconfig 确保所有依赖正常
           make defconfig
           
           echo "=== 🛡️ 编译前终极校验 ==="
-          if ! grep -q "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro=y" .config; then
-            echo "❌ 致命错误：设备变量未被正确锁定！"
+          # 再次确认目标变量还在不在
+          if ! grep -q "CONFIG_${JCG_VAR}=y" .config; then
+            echo "❌ 致命错误：设备变量 CONFIG_${JCG_VAR} 在 defconfig 后丢失！"
+            echo "当前 .config 中关于 target 的关键行："
+            grep "CONFIG_TARGET_DEVICE" .config
             exit 1
           fi
+          
           if ! grep -q "CONFIG_PACKAGE_luci=y" .config; then
             echo "❌ 致命错误：LuCI 核心未被激活！"
             exit 1
           fi
-          echo "✅ 校验完美通过！纯净单设备网页版配置就绪！🚀"
+          
+          echo "✅ 校验完美通过！架构、设备匹配无误！🚀"
 
       - name: Download package sources
         run: |
