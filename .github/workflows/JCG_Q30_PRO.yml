@@ -67,63 +67,44 @@ jobs:
           cd openwrt
           rm -rf .config tmp
           
-          # 1. 注入架构，生成索引
+          # 1. 基础架构注入
           echo "CONFIG_TARGET_mediatek=y" > .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+          # 开启多设备支持，防止单一设备被单选机制剔除
+          echo "CONFIG_TARGET_MULTI_PROFILE=y" >> .config
+          
+          # 2. 运行 defconfig 生成初始环境
           make defconfig
           
-          echo "=== 调试：查看所有 jcg 相关设备 ==="
-          grep -i 'jcg' tmp/.config-target.in || true
+          # 3. 使用官方工具注入设备名（这一步会自动处理依赖）
+          # 注意：变量名必须完全匹配日志中的 TARGET_DEVICE_...
+          echo "=== 正在注入设备: jcg_q30-pro ==="
+          ./scripts/config --enable CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro
           
-          # 2. 直接硬编码已知的正确变量（根据实际调试结果选一个）
-          # 常见的是 jcg_q30_pro 或 jcg_q30_pro_ubootmod
-          DEVICE_NAME="jcg_q30_pro"   # 如果实际是 ubootmod，则改为 jcg_q30_pro_ubootmod
-          
-          # 3. 重建配置，开启 MULTI_PROFILE 并指定设备
-          rm -f .config
-          cat > .config <<EOF
-          CONFIG_TARGET_mediatek=y
-          CONFIG_TARGET_mediatek_filogic=y
-          CONFIG_TARGET_MULTI_PROFILE=y
-          CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_${DEVICE_NAME}=y
-          
-          CONFIG_PACKAGE_luci=y
-          CONFIG_LUCI_LANG_zh_Hans=y
-          CONFIG_PACKAGE_luci-theme-bootstrap=y
-          
-          CONFIG_PACKAGE_luci-app-passwall=y
-          CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y
-          CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y
-          CONFIG_PACKAGE_luci-app-easytier=y
-          CONFIG_PACKAGE_kmod-tun=y
-          CONFIG_PACKAGE_kmod-nft-fullcone=y
-          EOF
-          
-          # 4. 执行 defconfig 激活所有设备
+          # 4. 再次 defconfig 固化依赖
           make defconfig
           
-          # 5. 剔除除目标设备外的所有其他设备
-          echo "=== 清理多余设备 ==="
-          grep "CONFIG_TARGET_DEVICE_.*=y" .config | grep -v "${DEVICE_NAME}" | cut -d '=' -f 1 | while read -r dev; do
-            sed -i "s/${dev}=y/# ${dev} is not set/g" .config
-          done
+          # 5. 注入插件（使用 config 工具安全添加，避免 sed 破坏格式）
+          ./scripts/config --enable CONFIG_PACKAGE_luci
+          ./scripts/config --enable CONFIG_LUCI_LANG_zh_Hans
+          ./scripts/config --enable CONFIG_PACKAGE_luci-theme-bootstrap
+          ./scripts/config --enable CONFIG_PACKAGE_luci-app-passwall
+          ./scripts/config --enable CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin
+          ./scripts/config --enable CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox
+          ./scripts/config --enable CONFIG_PACKAGE_luci-app-easytier
+          ./scripts/config --enable CONFIG_PACKAGE_kmod-tun
+          ./scripts/config --enable CONFIG_PACKAGE_kmod-nft-fullcone
           
-          # 6. 再次 defconfig 锁定
-          make defconfig
-          
-          # 7. 校验
-          if ! grep -q "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" .config; then
-            echo "❌ 设备变量丢失！"
-            exit 1
-          fi
-          if ! grep -q "CONFIG_PACKAGE_luci=y" .config; then
-            echo "❌ LuCI 丢失！"
+          # 6. 最终校验
+          echo "=== 最终校验 ==="
+          if ! grep -q "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro=y" .config; then
+            echo "❌ 关键错误：设备变量 CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro 未被启用！"
+            # 打印当前 .config 中的目标设备行，方便排查
+            grep "CONFIG_TARGET_DEVICE_.*=y" .config
             exit 1
           fi
           
-          echo "=== 最终激活的设备 ==="
-          grep "CONFIG_TARGET_DEVICE_.*=y" .config
-          echo "✅ 配置完成！"
+          echo "✅ 配置注入完成，未破坏格式，准备起飞！"
 
       - name: Download package sources
         run: |
