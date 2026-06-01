@@ -66,26 +66,56 @@ jobs:
         run: |
           cd openwrt
           
-          # 1. 彻底摧毁旧配置和临时缓存，确保环境绝对干净
-          rm -rf .config tmp
+          # 1. 彻底清场，生成初始配置菜单
+          rm -f .config tmp/.config-target.in
+          make defconfig
           
-          echo "=== ✍️ 开始硬编码注入极简配置 ==="
+          echo "=== 🕵️ 开始智能解析设备架构树 ==="
+          # 用你原来最棒的逻辑，精准抓取 Q30 Pro 变量名
+          JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | grep -i "pro" | head -n1)
+          if [ -z "$JCG_VAR" ]; then
+            JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | head -n1)
+          fi
+          if [ -z "$JCG_VAR" ]; then
+            echo "❌ 致命错误：找不到 q30 相关设备变量！"
+            exit 1
+          fi
+          echo "✅ 成功捕获设备底层变量: CONFIG_${JCG_VAR}"
           
-          # 2. 直接使用 kconfig 标准语法写入最终配置，放弃脆弱的 grep 抓取
-          cat > .config <<EOF
-          # 基础架构与设备 (绝对锁定 JCG Q30 Pro 主线)
-          CONFIG_TARGET_mediatek=y
-          CONFIG_TARGET_mediatek_filogic=y
-          CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro=y
-          # 明确关闭多设备混合编译，防止固件臃肿
-          # CONFIG_TARGET_MULTI_PROFILE is not set
+          # 反向推导它的父级架构
+          SUBTARGET_VAR=$(echo "$JCG_VAR" | sed -n 's/TARGET_DEVICE_\(.*\)_DEVICE_.*/TARGET_\1/p')
+          TARGET_VAR=$(echo "$SUBTARGET_VAR" | sed -n 's/\(TARGET_[^_]*\).*/\1/p')
           
-          # LuCI 网页后台基础全家桶 (解决进不去网页的问题)
+          # 2. 开始构建真正的 .config
+          rm -f .config
+          touch .config
+          
+          # ⚠️ 极其关键：必须开启 MULTI_PROFILE，Kconfig 才会认我们的 DEVICE 变量！
+          cat >> .config <<EOF
+          CONFIG_${TARGET_VAR}=y
+          CONFIG_${SUBTARGET_VAR}=y
+          CONFIG_TARGET_MULTI_PROFILE=y
+          CONFIG_${JCG_VAR}=y
+          EOF
+          
+          # 3. 运行一次 defconfig，让系统根据上述四个参数，把附带的所有其他设备也默认列出来
+          make defconfig
+          
+          echo "=== 🧹 屏蔽同架构无关路由器 ==="
+          # 为了不浪费 Actions 编译时间，我们要把自动带出来的同芯片其他路由器统统拉黑（只保留我们的 JCG）
+          grep "CONFIG_TARGET_DEVICE_.*=y" .config | grep -v "${JCG_VAR}" | cut -d '=' -f 1 | while read -r dev; do
+            sed -i "s/${dev}=y/# ${dev} is not set/g" .config
+          done
+          
+          echo "=== ✍️ 注入网页后台与核心插件 ==="
+          # 4. 追加 LuCI 和你需要的插件，同时拉黑巨无霸
+          cat >> .config <<EOF
+          # 解决没有网页界面的核心代码！
           CONFIG_PACKAGE_luci=y
           CONFIG_LUCI_LANG_zh_Hans=y
           CONFIG_PACKAGE_luci-theme-bootstrap=y
           
-          # 核心插件集成
+          # 你的专属网络利器
           CONFIG_PACKAGE_luci-app-passwall=y
           CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y
           CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y
@@ -94,7 +124,7 @@ jobs:
           CONFIG_PACKAGE_kmod-tun=y
           CONFIG_PACKAGE_kmod-nft-fullcone=y
           
-          # 强制拉黑所有不需要的大型垃圾插件
+          # 强制拉黑巨无霸下载和共享组件，保证固件小巧
           # CONFIG_PACKAGE_luci-app-aria2 is not set
           # CONFIG_PACKAGE_aria2 is not set
           # CONFIG_PACKAGE_luci-app-transmission is not set
@@ -117,14 +147,12 @@ jobs:
           # CONFIG_PACKAGE_tailscale is not set
           EOF
           
-          # 3. 只运行一次 defconfig！它会根据我们给的底板，自动补全那些确实需要的底层内核依赖
+          # 5. 终极固化配置
           make defconfig
           
           echo "=== 🛡️ 编译前终极校验 ==="
-          # 检查硬编码进去的设备变量有没有被编译系统拒绝
-          if ! grep -q "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro=y" .config; then
-             echo "❌ 致命错误：设备变量依然被清除！下面打印出 .config 里的所有 TARGET_DEVICE 以供排查："
-             grep "TARGET_DEVICE" .config || true
+          if ! grep -q "CONFIG_${JCG_VAR}=y" .config; then
+             echo "❌ 致命错误：设备变量又被清除了！"
              exit 1
           fi
           
@@ -133,7 +161,7 @@ jobs:
              exit 1
           fi
           
-          echo "✅ 校验完美通过！没有啰嗦的动态识别，直达目标！🚀"
+          echo "✅ 校验完美通过！架构锁定且带网页版配置就绪！🚀"
 
       - name: Download package sources
         run: |
