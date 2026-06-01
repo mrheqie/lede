@@ -65,53 +65,40 @@ jobs:
       - name: Configure Firmware & Verify
         run: |
           cd openwrt
-          
-          # 1. 彻底清场
           rm -rf .config tmp
           
-          echo "=== 🎯 第一步：先注入基础架构，用于生成底层设备索引 ==="
+          # 1. 先写入最小架构，生成索引文件
           echo "CONFIG_TARGET_mediatek=y" > .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          
-          # 运行一次默认配置，让系统在 tmp/ 下生成该架构的符合规范的设备符号表
           make defconfig
           
-          echo "=== 🕵️ 第二步：智能精准抓取设备变量（严格遵循下划线规范） ==="
-          # 优先级 1：优先抓取大分区变体 ubootmod
+          # 2. 抓取设备变量（依次尝试 ubootmod / pro / 任意 q30）
           JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*q30[a-zA-Z0-9_]*ubootmod' tmp/.config-target.in | head -n1)
-          
-          # 优先级 2：如果源码里没有单独的 ubootmod 变体，则抓取普通的 pro 变体
           if [ -z "$JCG_VAR" ]; then
             JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*q30[a-zA-Z0-9_]*pro' tmp/.config-target.in | head -n1)
           fi
-          
-          # 优先级 3：兜底策略，抓取任意包含 q30 的全下划线变量（你的源码命中这一条，抓到了纯净的 jcg_q30）
           if [ -z "$JCG_VAR" ]; then
             JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*q30[a-zA-Z0-9_]*' tmp/.config-target.in | head -n1)
           fi
           
           if [ -z "$JCG_VAR" ]; then
-            echo "❌ 致命错误：在源码中完全找不到任何与 q30 相关的符合 Kconfig 规范的符号！"
+            echo "❌ 未找到任何 q30 设备变量"
             exit 1
           fi
+          echo "✅ 捕获设备变量: CONFIG_${JCG_VAR}"
           
-          echo "✅ 成功捕获源码中的标准 Kconfig 变量: CONFIG_${JCG_VAR}"
-          
-          echo "=== ✍️ 第三步：彻底重构 .config，将架构与具体设备【同时】喂给系统 ==="
-          # 🌟 关键修正：为了防止 Kconfig 单选冲突抹除变量，我们必须重新写一个干净的 .config
-          # 让架构、子架构、具体路由器型号【并排坐】，一次性喂给 defconfig
+          # 3. 重建干净的 .config，这次一定要加上 MULTI_PROFILE！
           rm -f .config
           cat > .config <<EOF
           CONFIG_TARGET_mediatek=y
           CONFIG_TARGET_mediatek_filogic=y
+          CONFIG_TARGET_MULTI_PROFILE=y
           CONFIG_${JCG_VAR}=y
           
-          # LuCI 网页后台基础全家桶
           CONFIG_PACKAGE_luci=y
           CONFIG_LUCI_LANG_zh_Hans=y
           CONFIG_PACKAGE_luci-theme-bootstrap=y
           
-          # 核心网络插件集成（依赖完全交由 passwall 自动处理）
           CONFIG_PACKAGE_luci-app-passwall=y
           CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y
           CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y
@@ -120,25 +107,31 @@ jobs:
           CONFIG_PACKAGE_kmod-nft-fullcone=y
           EOF
           
-          echo "=== 🗜️ 第四步：执行唯一一次终极固化（激活原生单选裁剪） ==="
-          # 此时因为设备名正确，且与架构一起同时喂入，Kconfig 会完美接受并自动关闭其他所有路由器
+          # 4. 首次 defconfig，会激活所有同架构设备
           make defconfig
           
-          echo "=== 🛡️ 第五步：编译前终极校验 ==="
+          # 5. 精准切除除 JCG 外的所有其他设备（保持只有我们的目标）
+          echo "=== 🧹 剔除其他无关设备 ==="
+          grep "CONFIG_TARGET_DEVICE_.*=y" .config | grep -v "${JCG_VAR}" | cut -d '=' -f 1 | while read -r dev; do
+            sed -i "s/${dev}=y/# ${dev} is not set/g" .config
+          done
+          
+          # 6. 再次 defconfig 固化最终配置
+          make defconfig
+          
+          # 7. 最终校验
           if ! grep -q "CONFIG_${JCG_VAR}=y" .config; then
-             echo "❌ 致命错误：设备变量 CONFIG_${JCG_VAR} 在最终固化时丢失！"
-             exit 1
+            echo "❌ 设备变量丢失！"
+            exit 1
           fi
-          
           if ! grep -q "CONFIG_PACKAGE_luci=y" .config; then
-             echo "❌ 致命错误：LuCI 核心未被激活！"
-             exit 1
+            echo "❌ LuCI 未激活！"
+            exit 1
           fi
           
-          echo "=== 📋 实际激活的唯一设备目标（用于肉眼双检） ==="
+          echo "=== 激活的唯一设备 ==="
           grep "CONFIG_TARGET_DEVICE_.*=y" .config
-          
-          echo "✅ 完美共识方案！架构与具体设备同时灌入，单选锁死。准备起飞！🚀"
+          echo "✅ 校验通过！MULTI_PROFILE 开启 + 精准切除，完美锁定目标。"
 
       - name: Download package sources
         run: |
