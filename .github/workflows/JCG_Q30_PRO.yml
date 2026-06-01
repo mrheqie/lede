@@ -67,44 +67,48 @@ jobs:
           cd openwrt
           rm -rf .config tmp
           
-          # 1. 基础架构注入
+          echo "=== 1. 注入基础架构与多设备支持 ==="
           echo "CONFIG_TARGET_mediatek=y" > .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-          # 开启多设备支持，防止单一设备被单选机制剔除
           echo "CONFIG_TARGET_MULTI_PROFILE=y" >> .config
           
-          # 2. 运行 defconfig 生成初始环境
+          echo "=== 2. 注入目标设备：jcg_q30-pro ==="
+          # 直接写入目标设备变量
+          echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro=y" >> .config
+          
+          # 写入插件配置
+          cat >> .config <<EOF
+          CONFIG_PACKAGE_luci=y
+          CONFIG_LUCI_LANG_zh_Hans=y
+          CONFIG_PACKAGE_luci-theme-bootstrap=y
+          CONFIG_PACKAGE_luci-app-passwall=y
+          CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y
+          CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y
+          CONFIG_PACKAGE_luci-app-easytier=y
+          CONFIG_PACKAGE_kmod-tun=y
+          CONFIG_PACKAGE_kmod-nft-fullcone=y
+          EOF
+          
+          echo "=== 3. 执行单次 defconfig 固化依赖 ==="
           make defconfig
           
-          # 3. 使用官方工具注入设备名（这一步会自动处理依赖）
-          # 注意：变量名必须完全匹配日志中的 TARGET_DEVICE_...
-          echo "=== 正在注入设备: jcg_q30-pro ==="
-          ./scripts/config --enable CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro
-          
-          # 4. 再次 defconfig 固化依赖
-          make defconfig
-          
-          # 5. 注入插件（使用 config 工具安全添加，避免 sed 破坏格式）
-          ./scripts/config --enable CONFIG_PACKAGE_luci
-          ./scripts/config --enable CONFIG_LUCI_LANG_zh_Hans
-          ./scripts/config --enable CONFIG_PACKAGE_luci-theme-bootstrap
-          ./scripts/config --enable CONFIG_PACKAGE_luci-app-passwall
-          ./scripts/config --enable CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin
-          ./scripts/config --enable CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox
-          ./scripts/config --enable CONFIG_PACKAGE_luci-app-easytier
-          ./scripts/config --enable CONFIG_PACKAGE_kmod-tun
-          ./scripts/config --enable CONFIG_PACKAGE_kmod-nft-fullcone
-          
-          # 6. 最终校验
-          echo "=== 最终校验 ==="
+          echo "=== 4. 强制检查与补丁 ==="
+          # 如果 make defconfig 把我们的设备给剔除了，手动加回去
           if ! grep -q "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro=y" .config; then
-            echo "❌ 关键错误：设备变量 CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro 未被启用！"
-            # 打印当前 .config 中的目标设备行，方便排查
-            grep "CONFIG_TARGET_DEVICE_.*=y" .config
+             echo "检测到设备变量丢失，正在强制补回..."
+             echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro=y" >> .config
+             # 确保 Multi Profile 依然开启
+             grep -q "CONFIG_TARGET_MULTI_PROFILE=y" .config || echo "CONFIG_TARGET_MULTI_PROFILE=y" >> .config
+          fi
+          
+          echo "=== 5. 最终校验 ==="
+          if ! grep -q "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro=y" .config; then
+            echo "❌ 致命错误：设备变量 CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro 最终依然丢失！"
+            grep "CONFIG_TARGET_DEVICE_" .config
             exit 1
           fi
           
-          echo "✅ 配置注入完成，未破坏格式，准备起飞！"
+          echo "✅ 配置已锁定，编译即将在纯净环境下开始！"
 
       - name: Download package sources
         run: |
