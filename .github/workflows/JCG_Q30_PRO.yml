@@ -65,40 +65,23 @@ jobs:
       - name: Configure Firmware & Verify
         run: |
           cd openwrt
+          
+          # 1. 彻底清空并初始化干净的配置文件
           rm -f .config
           touch .config
-          make defconfig
           
-          echo "=== 🕵️ 开始智能解析设备架构树 ==="
-          JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | grep -i "ubootmod" | head -n1)
-          if [ -z "$JCG_VAR" ]; then
-            JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | grep -i "pro" | head -n1)
-          fi
-          if [ -z "$JCG_VAR" ]; then
-            JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | head -n1)
-          fi
-          if [ -z "$JCG_VAR" ]; then
-            echo "❌ 致命错误：找不到任何 q30 相关设备变量！"
-            exit 1
-          fi
+          # 2. 核心修正：直接注入 JCG Q30 Pro 的主线大分区（ubootmod / fixed-parts）核心架构变量
+          # 这样能确保不引入跨机型驱动污染，体积最小，分区最精准
+          echo "CONFIG_TARGET_mediatek=y" >> .config
+          echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+          echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro=y" >> .config
           
-          echo "✅ 成功捕获设备底层变量: CONFIG_${JCG_VAR}"
-          SUBTARGET_VAR=$(echo "$JCG_VAR" | sed -n 's/TARGET_DEVICE_\(.*\)_DEVICE_.*/TARGET_\1/p')
-          TARGET_VAR=$(echo "$SUBTARGET_VAR" | sed -n 's/\(TARGET_[^_]*\).*/\1/p')
-          
-          # 核心修正 1: 重新初始化干净的配置文件，精准对齐硬件目标，不使用 MULTI_PROFILE 污染
-          rm -f .config
-          touch .config
-          echo "CONFIG_${TARGET_VAR}=y" >> .config
-          echo "CONFIG_${SUBTARGET_VAR}=y" >> .config
-          echo "CONFIG_${JCG_VAR}=y" >> .config
-          
-          # 核心修正 2: 强制补齐 LuCI 网页后台基础全家桶和中文语言包
+          # 3. 强制补齐 LuCI 网页后台基础全家桶和中文语言包（解决没有网页界面的问题）
           echo "CONFIG_PACKAGE_luci=y" >> .config
           echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
           echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
           
-          # 核心功能组件与核心插件集成
+          # 4. 核心功能组件与核心插件集成
           echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y" >> .config
@@ -107,7 +90,7 @@ jobs:
           echo "CONFIG_PACKAGE_kmod-tun=y" >> .config
           echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
           
-          # 深度精简无关大体积插件
+          # 5. 深度精简无关大体积插件，防止固件臃肿
           PLUGINS_TO_REMOVE=(
             "luci-app-aria2" "aria2" "luci-app-transmission" "transmission-daemon" "transmission-web"
             "luci-app-qbittorrent" "qbittorrent" "luci-app-samba4" "samba4-server" "samba4-libs"
@@ -115,15 +98,21 @@ jobs:
             "luci-app-dae" "dae" "luci-app-openclash" "luci-app-softether" 
             "luci-app-tailscale" "tailscale"
           )
+          
+          # 先用 defconfig 展开依赖树，让默认设备的关联关系生成
+          make defconfig
+          
+          # 强行将精简列表里的插件和默认带的其他无关机型全部关闭
           for pkg in "${PLUGINS_TO_REMOVE[@]}"; do
+            sed -i "/CONFIG_PACKAGE_${pkg}=y/d" .config
             echo "CONFIG_PACKAGE_${pkg}=n" >> .config
           done
           
-          # 展开依赖
+          # 再次执行 defconfig 固化最终配置
           make defconfig
           
           echo "=== 🛡️ 编译前终极校验 ==="
-          if ! grep -q "CONFIG_${JCG_VAR}=y" .config; then
+          if ! grep -q "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro=y" .config; then
             echo "❌ 致命错误：设备变量未被正确锁定！"
             exit 1
           fi
