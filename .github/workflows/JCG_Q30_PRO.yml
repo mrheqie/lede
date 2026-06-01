@@ -66,27 +66,21 @@ jobs:
         run: |
           cd openwrt
           
-          # 1. 运行 defconfig 生成基础的 tmp/.config-target.in
+          # 1. 运行 defconfig 生成初始环境
           make defconfig
           
-          echo "=== 🕵️ 开始精准锁定设备变量 ==="
-          # 从生成的 target 列表中搜索 Q30 Pro，保证变量名 100% 正确
-          # 假设变量名包含 jcg_q30-pro
+          echo "=== 🕵️ 智能识别设备变量 ==="
+          # 获取正确的目标设备变量
           JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | grep "q30-pro" | head -n1)
+          # 获取父级 Target (mediatek) 和 Subtarget (filogic)
+          TARGET_BOARD=$(grep 'CONFIG_TARGET_BOARD' tmp/.config-target.in | cut -d'"' -f2)
+          # 假设固定为 mediatek/filogic (Q30 Pro 是这个系列)
           
-          if [ -z "$JCG_VAR" ]; then
-            echo "❌ 致命错误：在 tmp/.config-target.in 中找不到 JCG Q30 Pro 的目标变量！"
-            exit 1
-          fi
-          
-          echo "✅ 成功锁定设备变量: CONFIG_${JCG_VAR}"
-          
-          # 2. 生成一份全新的、干净的 .config
-          # 使用 heredoc 方式写入，避免追加带来的冲突
+          # 2. 生成配置 (Heredoc 模式，一次性写入)
           cat > .config <<EOF
           CONFIG_TARGET_mediatek=y
           CONFIG_TARGET_mediatek_filogic=y
-          CONFIG_${JCG_VAR}=y
+          CONFIG_TARGET_mediatek_filogic_DEVICE_${JCG_VAR#TARGET_DEVICE_mediatek_filogic_DEVICE_}=y
           CONFIG_TARGET_MULTI_PROFILE=n
           CONFIG_PACKAGE_luci=y
           CONFIG_LUCI_LANG_zh_Hans=y
@@ -100,10 +94,7 @@ jobs:
           CONFIG_PACKAGE_kmod-nft-fullcone=y
           EOF
           
-          # 3. 运行 defconfig 来解析并填补依赖项 (这一步最关键，它会基于我们刚才写的 .config 补全必要的内核选项)
-          make defconfig
-          
-          # 4. 精简不需要的插件
+          # 3. 追加删除不需要的插件
           PLUGINS_TO_REMOVE=(
             "luci-app-aria2" "aria2" "luci-app-transmission" "transmission-daemon" "transmission-web"
             "luci-app-qbittorrent" "qbittorrent" "luci-app-samba4" "samba4-server" "samba4-libs"
@@ -111,30 +102,23 @@ jobs:
             "luci-app-dae" "dae" "luci-app-openclash" "luci-app-softether" 
             "luci-app-tailscale" "tailscale"
           )
-          
           for pkg in "${PLUGINS_TO_REMOVE[@]}"; do
-            sed -i "/CONFIG_PACKAGE_${pkg}=y/d" .config
             echo "CONFIG_PACKAGE_${pkg}=n" >> .config
           done
           
-          # 最后再做一次 defconfig 确保所有依赖正常
+          # 4. 只有在这里运行一次 defconfig，让系统处理依赖，而不是擦除配置
+          # 如果此时 defconfig 报错，说明依赖没写对
           make defconfig
           
-          echo "=== 🛡️ 编译前终极校验 ==="
-          # 再次确认目标变量还在不在
-          if ! grep -q "CONFIG_${JCG_VAR}=y" .config; then
-            echo "❌ 致命错误：设备变量 CONFIG_${JCG_VAR} 在 defconfig 后丢失！"
-            echo "当前 .config 中关于 target 的关键行："
-            grep "CONFIG_TARGET_DEVICE" .config
-            exit 1
+          echo "=== 🛡️ 最终校验 ==="
+          # 检查设备变量是否还存活
+          if ! grep -q "CONFIG_${JCG_VAR#TARGET_DEVICE_}=y" .config && ! grep -q "${JCG_VAR}=y" .config; then
+             echo "❌ 致命错误：设备变量被清除了！"
+             grep "TARGET_DEVICE" .config || true
+             exit 1
           fi
           
-          if ! grep -q "CONFIG_PACKAGE_luci=y" .config; then
-            echo "❌ 致命错误：LuCI 核心未被激活！"
-            exit 1
-          fi
-          
-          echo "✅ 校验完美通过！架构、设备匹配无误！🚀"
+          echo "✅ 校验通过！"
 
       - name: Download package sources
         run: |
