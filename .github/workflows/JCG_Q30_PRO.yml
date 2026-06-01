@@ -66,65 +66,39 @@ jobs:
         run: |
           cd openwrt
           
-          # 1. 彻底清场，生成初始配置菜单
-          rm -f .config tmp/.config-target.in
-          make defconfig
+          # 1. 彻底摧毁旧配置和临时缓存，确保环境绝对干净
+          rm -rf .config tmp
           
-          echo "=== 🕵️ 开始智能解析设备架构树 ==="
-          # 用你原来最棒的逻辑，精准抓取 Q30 Pro 变量名
-          JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | grep -i "pro" | head -n1)
-          if [ -z "$JCG_VAR" ]; then
-            JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_-]*q30[a-zA-Z0-9_-]*' tmp/.config-target.in | head -n1)
-          fi
-          if [ -z "$JCG_VAR" ]; then
-            echo "❌ 致命错误：找不到 q30 相关设备变量！"
-            exit 1
-          fi
-          echo "✅ 成功捕获设备底层变量: CONFIG_${JCG_VAR}"
+          echo "=== ✍️ 开始硬编码注入极简配置 ==="
           
-          # 反向推导它的父级架构
-          SUBTARGET_VAR=$(echo "$JCG_VAR" | sed -n 's/TARGET_DEVICE_\(.*\)_DEVICE_.*/TARGET_\1/p')
-          TARGET_VAR=$(echo "$SUBTARGET_VAR" | sed -n 's/\(TARGET_[^_]*\).*/\1/p')
+          # 2. 直接使用 kconfig 标准语法写入最终配置
+          cat > .config <<EOF
+          # 基础架构锁定
+          CONFIG_TARGET_mediatek=y
+          CONFIG_TARGET_mediatek_filogic=y
           
-          # 2. 开始构建真正的 .config
-          rm -f .config
-          touch .config
+          # 🎯 吸收建议 1：精准锁定 ubootmod（大分区）变体！防止变砖！
+          CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro-ubootmod=y
           
-          # ⚠️ 极其关键：必须开启 MULTI_PROFILE，Kconfig 才会认我们的 DEVICE 变量！
-          cat >> .config <<EOF
-          CONFIG_${TARGET_VAR}=y
-          CONFIG_${SUBTARGET_VAR}=y
+          # 必须开启多设备混合编译引擎，但我们在后面会把多余的切掉
           CONFIG_TARGET_MULTI_PROFILE=y
-          CONFIG_${JCG_VAR}=y
-          EOF
           
-          # 3. 运行一次 defconfig，让系统根据上述四个参数，把附带的所有其他设备也默认列出来
-          make defconfig
-          
-          echo "=== 🧹 屏蔽同架构无关路由器 ==="
-          # 为了不浪费 Actions 编译时间，我们要把自动带出来的同芯片其他路由器统统拉黑（只保留我们的 JCG）
-          grep "CONFIG_TARGET_DEVICE_.*=y" .config | grep -v "${JCG_VAR}" | cut -d '=' -f 1 | while read -r dev; do
-            sed -i "s/${dev}=y/# ${dev} is not set/g" .config
-          done
-          
-          echo "=== ✍️ 注入网页后台与核心插件 ==="
-          # 4. 追加 LuCI 和你需要的插件，同时拉黑巨无霸
-          cat >> .config <<EOF
-          # 解决没有网页界面的核心代码！
+          # LuCI 网页后台基础全家桶
           CONFIG_PACKAGE_luci=y
           CONFIG_LUCI_LANG_zh_Hans=y
           CONFIG_PACKAGE_luci-theme-bootstrap=y
           
-          # 你的专属网络利器
+          # 核心插件集成
           CONFIG_PACKAGE_luci-app-passwall=y
           CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y
           CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y
-          CONFIG_PACKAGE_geoview=y
+          # 🎯 吸收建议 2：删除了不存在的 geoview，依赖交给 passwall 自动处理
+          
           CONFIG_PACKAGE_luci-app-easytier=y
           CONFIG_PACKAGE_kmod-tun=y
           CONFIG_PACKAGE_kmod-nft-fullcone=y
           
-          # 强制拉黑巨无霸下载和共享组件，保证固件小巧
+          # 强制拉黑所有不需要的大型垃圾插件
           # CONFIG_PACKAGE_luci-app-aria2 is not set
           # CONFIG_PACKAGE_aria2 is not set
           # CONFIG_PACKAGE_luci-app-transmission is not set
@@ -147,12 +121,24 @@ jobs:
           # CONFIG_PACKAGE_tailscale is not set
           EOF
           
-          # 5. 终极固化配置
+          # 3. 展开配置
+          make defconfig
+          
+          echo "=== 🧹 屏蔽同架构无关路由器 ==="
+          # 为了只编译 Q30 Pro，把自动带出来的同芯片其他几十个路由器拉黑
+          grep "CONFIG_TARGET_DEVICE_.*=y" .config | grep -v "jcg_q30-pro-ubootmod" | cut -d '=' -f 1 | while read -r dev; do
+            sed -i "s/${dev}=y/# ${dev} is not set/g" .config
+          done
+          
+          # 4. 终极固化
           make defconfig
           
           echo "=== 🛡️ 编译前终极校验 ==="
-          if ! grep -q "CONFIG_${JCG_VAR}=y" .config; then
-             echo "❌ 致命错误：设备变量又被清除了！"
+          # 校验是否成功锁定 ubootmod 大分区变体
+          if ! grep -q "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro-ubootmod=y" .config; then
+             echo "❌ 致命错误：大分区设备变量被清除！大概率是源码中没有这个 -ubootmod 后缀！"
+             echo "当前可用的 q30 相关设备有："
+             grep -i "q30" tmp/.config-target.in || true
              exit 1
           fi
           
@@ -161,7 +147,7 @@ jobs:
              exit 1
           fi
           
-          echo "✅ 校验完美通过！架构锁定且带网页版配置就绪！🚀"
+          echo "✅ 完美校验通过！大分区匹配，依赖精简完毕！🚀"
 
       - name: Download package sources
         run: |
