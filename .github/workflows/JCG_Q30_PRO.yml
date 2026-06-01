@@ -67,33 +67,25 @@ jobs:
           cd openwrt
           rm -rf .config tmp
           
-          # 1. 先写入最小架构，生成索引文件
+          # 1. 注入架构，生成索引
           echo "CONFIG_TARGET_mediatek=y" > .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
           make defconfig
           
-          # 2. 抓取设备变量（依次尝试 ubootmod / pro / 任意 q30）
-          JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*q30[a-zA-Z0-9_]*ubootmod' tmp/.config-target.in | head -n1)
-          if [ -z "$JCG_VAR" ]; then
-            JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*q30[a-zA-Z0-9_]*pro' tmp/.config-target.in | head -n1)
-          fi
-          if [ -z "$JCG_VAR" ]; then
-            JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*q30[a-zA-Z0-9_]*' tmp/.config-target.in | head -n1)
-          fi
+          echo "=== 调试：查看所有 jcg 相关设备 ==="
+          grep -i 'jcg' tmp/.config-target.in || true
           
-          if [ -z "$JCG_VAR" ]; then
-            echo "❌ 未找到任何 q30 设备变量"
-            exit 1
-          fi
-          echo "✅ 捕获设备变量: CONFIG_${JCG_VAR}"
+          # 2. 直接硬编码已知的正确变量（根据实际调试结果选一个）
+          # 常见的是 jcg_q30_pro 或 jcg_q30_pro_ubootmod
+          DEVICE_NAME="jcg_q30_pro"   # 如果实际是 ubootmod，则改为 jcg_q30_pro_ubootmod
           
-          # 3. 重建干净的 .config，这次一定要加上 MULTI_PROFILE！
+          # 3. 重建配置，开启 MULTI_PROFILE 并指定设备
           rm -f .config
           cat > .config <<EOF
           CONFIG_TARGET_mediatek=y
           CONFIG_TARGET_mediatek_filogic=y
           CONFIG_TARGET_MULTI_PROFILE=y
-          CONFIG_${JCG_VAR}=y
+          CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_${DEVICE_NAME}=y
           
           CONFIG_PACKAGE_luci=y
           CONFIG_LUCI_LANG_zh_Hans=y
@@ -107,31 +99,31 @@ jobs:
           CONFIG_PACKAGE_kmod-nft-fullcone=y
           EOF
           
-          # 4. 首次 defconfig，会激活所有同架构设备
+          # 4. 执行 defconfig 激活所有设备
           make defconfig
           
-          # 5. 精准切除除 JCG 外的所有其他设备（保持只有我们的目标）
-          echo "=== 🧹 剔除其他无关设备 ==="
-          grep "CONFIG_TARGET_DEVICE_.*=y" .config | grep -v "${JCG_VAR}" | cut -d '=' -f 1 | while read -r dev; do
+          # 5. 剔除除目标设备外的所有其他设备
+          echo "=== 清理多余设备 ==="
+          grep "CONFIG_TARGET_DEVICE_.*=y" .config | grep -v "${DEVICE_NAME}" | cut -d '=' -f 1 | while read -r dev; do
             sed -i "s/${dev}=y/# ${dev} is not set/g" .config
           done
           
-          # 6. 再次 defconfig 固化最终配置
+          # 6. 再次 defconfig 锁定
           make defconfig
           
-          # 7. 最终校验
-          if ! grep -q "CONFIG_${JCG_VAR}=y" .config; then
+          # 7. 校验
+          if ! grep -q "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" .config; then
             echo "❌ 设备变量丢失！"
             exit 1
           fi
           if ! grep -q "CONFIG_PACKAGE_luci=y" .config; then
-            echo "❌ LuCI 未激活！"
+            echo "❌ LuCI 丢失！"
             exit 1
           fi
           
-          echo "=== 激活的唯一设备 ==="
+          echo "=== 最终激活的设备 ==="
           grep "CONFIG_TARGET_DEVICE_.*=y" .config
-          echo "✅ 校验通过！MULTI_PROFILE 开启 + 精准切除，完美锁定目标。"
+          echo "✅ 配置完成！"
 
       - name: Download package sources
         run: |
