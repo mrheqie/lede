@@ -69,17 +69,15 @@ jobs:
           # 1. 彻底清场
           rm -rf .config tmp
           
-          echo "=== 🎯 修复 DeepSeek 发现的致命细节：预先注入基础架构 ==="
-          # 在运行第一次 defconfig 之前，必须先明确告诉系统我们要编译联发科 Filogic 架构
-          # 这样系统才不会报错，并且能顺利生成该架构下的所有路由器底层索引
+          echo "=== 🎯 第一步：先注入基础架构，用于生成底层设备索引 ==="
           echo "CONFIG_TARGET_mediatek=y" > .config
           echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
           
-          # 2. 此时架构已锁定，运行 defconfig 绝对不会报错，并安全生成 tmp/ 索引文件
+          # 运行一次默认配置，让系统在 tmp/ 下生成该架构的符合规范的设备符号表
           make defconfig
           
-          echo "=== 🕵️ 智能精准抓取设备变量（严格遵循下划线规范） ==="
-          # 优先级 1：优先抓取大分区变体 ubootmod（严格排除了连字符 - 隐患）
+          echo "=== 🕵️ 第二步：智能精准抓取设备变量（严格遵循下划线规范） ==="
+          # 优先级 1：优先抓取大分区变体 ubootmod
           JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*q30[a-zA-Z0-9_]*ubootmod' tmp/.config-target.in | head -n1)
           
           # 优先级 2：如果源码里没有单独的 ubootmod 变体，则抓取普通的 pro 变体
@@ -87,7 +85,7 @@ jobs:
             JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*q30[a-zA-Z0-9_]*pro' tmp/.config-target.in | head -n1)
           fi
           
-          # 优先级 3：兜底策略，抓取任意包含 q30 的全下划线变量
+          # 优先级 3：兜底策略，抓取任意包含 q30 的全下划线变量（你的源码命中这一条，抓到了纯净的 jcg_q30）
           if [ -z "$JCG_VAR" ]; then
             JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*q30[a-zA-Z0-9_]*' tmp/.config-target.in | head -n1)
           fi
@@ -99,10 +97,13 @@ jobs:
           
           echo "✅ 成功捕获源码中的标准 Kconfig 变量: CONFIG_${JCG_VAR}"
           
-          echo "=== ✍️ 追加注入具体设备变量与核心插件 ==="
-          # 3. 注意：因为前面已经创建了 .config，这里必须用 >> 进行追加写入
-          cat >> .config <<EOF
-          # 精准锁定捕获到的路由器型号
+          echo "=== ✍️ 第三步：彻底重构 .config，将架构与具体设备【同时】喂给系统 ==="
+          # 🌟 关键修正：为了防止 Kconfig 单选冲突抹除变量，我们必须重新写一个干净的 .config
+          # 让架构、子架构、具体路由器型号【并排坐】，一次性喂给 defconfig
+          rm -f .config
+          cat > .config <<EOF
+          CONFIG_TARGET_mediatek=y
+          CONFIG_TARGET_mediatek_filogic=y
           CONFIG_${JCG_VAR}=y
           
           # LuCI 网页后台基础全家桶
@@ -119,12 +120,11 @@ jobs:
           CONFIG_PACKAGE_kmod-nft-fullcone=y
           EOF
           
-          # 4. 终极固化配置
-          # 此时由于未开启 MULTI_PROFILE，Kconfig 的原生 Choice 单选机制被完美激活
-          # 系统会自动把同芯片的其他几十款无关路由器全部关闭（自动设置为 # ... is not set）
+          echo "=== 🗜️ 第四步：执行唯一一次终极固化（激活原生单选裁剪） ==="
+          # 此时因为设备名正确，且与架构一起同时喂入，Kconfig 会完美接受并自动关闭其他所有路由器
           make defconfig
           
-          echo "=== 🛡️ 编译前终极校验 ==="
+          echo "=== 🛡️ 第五步：编译前终极校验 ==="
           if ! grep -q "CONFIG_${JCG_VAR}=y" .config; then
              echo "❌ 致命错误：设备变量 CONFIG_${JCG_VAR} 在最终固化时丢失！"
              exit 1
@@ -138,7 +138,7 @@ jobs:
           echo "=== 📋 实际激活的唯一设备目标（用于肉眼双检） ==="
           grep "CONFIG_TARGET_DEVICE_.*=y" .config
           
-          echo "✅ 完美！先给架构再抓变量，彻底绕过底层报错。原生单选裁剪固件已就绪！🚀"
+          echo "✅ 完美共识方案！架构与具体设备同时灌入，单选锁死。准备起飞！🚀"
 
       - name: Download package sources
         run: |
