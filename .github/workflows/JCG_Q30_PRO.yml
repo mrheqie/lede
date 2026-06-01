@@ -66,34 +66,73 @@ jobs:
         run: |
           cd openwrt
           
-          # 1. 彻底摧毁旧配置和临时缓存，确保环境绝对干净
+          # 1. 彻底清场，运行一次默认配置以生成底层架构索引文件 tmp/.config-target.in
           rm -rf .config tmp
+          make defconfig
           
-          echo "=== ✍️ 开始硬编码注入极简配置 ==="
+          echo "=== 🕵️ 智能精准抓取设备变量（严格遵循下划线规范） ==="
+          # 🎯 吸收 DeepSeek 建议：Kconfig 变量只允许下划线 _，因此匹配符去掉了 -
+          # 优先级 1：优先抓取大分区变体 ubootmod
+          JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*q30[a-zA-Z0-9_]*ubootmod' tmp/.config-target.in | head -n1)
           
-          # 2. 直接使用 kconfig 标准语法写入最终配置
-          cat > .config <<EOF
-          # 基础架构锁定
-          CONFIG_TARGET_mediatek=y
-          CONFIG_TARGET_mediatek_filogic=y
+          # 优先级 2：如果源码里没有单独的 ubootmod 变体，则抓取普通的 pro 变体
+          if [ -z "$JCG_VAR" ]; then
+            JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*q30[a-zA-Z0-9_]*pro' tmp/.config-target.in | head -n1)
+          fi
           
-          # 🎯 吸收建议 1：精准锁定 ubootmod（大分区）变体！防止变砖！
-          CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro-ubootmod=y
+          # 优先级 3：兜底策略，抓取任意包含 q30 的全下划线变量
+          if [ -z "$JCG_VAR" ]; then
+            JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*q30[a-zA-Z0-9_]*' tmp/.config-target.in | head -n1)
+          fi
           
-          # 必须开启多设备混合编译引擎，但我们在后面会把多余的切掉
+          if [ -z "$JCG_VAR" ]; then
+            echo "❌ 致命错误：在源码中完全找不到任何与 q30 相关的符合 Kconfig 规范的符号！"
+            echo "以下是 tmp/.config-target.in 中包含 mediatek 的部分内容供排查："
+            grep -i "mediatek" tmp/.config-target.in | head -n 30 || true
+            exit 1
+          fi
+          
+          echo "✅ 成功捕获源码中的标准 Kconfig 变量: CONFIG_${JCG_VAR}"
+          
+          # 2. 动态反向推导它的父级架构（Target 和 Subtarget）
+          SUBTARGET_VAR=$(echo "$JCG_VAR" | sed -n 's/TARGET_DEVICE_\(.*\)_DEVICE_.*/TARGET_\1/p')
+          TARGET_VAR=$(echo "$SUBTARGET_VAR" | sed -n 's/\(TARGET_[^_]*\).*/\1/p')
+          
+          echo "🎯 推导出的父级目标: CONFIG_${TARGET_VAR}"
+          echo "🎯 推导出的子级目标: CONFIG_${SUBTARGET_VAR}"
+          
+          # 3. 彻底清空舊 .config，开始写入我们捕获到的纯正变量
+          rm -f .config
+          touch .config
+          
+          cat >> .config <<EOF
+          CONFIG_${TARGET_VAR}=y
+          CONFIG_${SUBTARGET_VAR}=y
           CONFIG_TARGET_MULTI_PROFILE=y
+          CONFIG_${JCG_VAR}=y
+          EOF
           
+          # 4. 运行 defconfig 让系统基于这四个变量自动扩展出同芯片的全量设备
+          make defconfig
+          
+          echo "=== 🧹 屏蔽同架构无关路由器 ==="
+          # 将自动带出来的其他几十款路由器（如小米、红米等）精准切除，只保留我们的 JCG 目标
+          grep "CONFIG_TARGET_DEVICE_.*=y" .config | grep -v "${JCG_VAR}" | cut -d '=' -f 1 | while read -r dev; do
+            sed -i "s/${dev}=y/# ${dev} is not set/g" .config
+          done
+          
+          echo "=== ✍️ 注入网页后台与核心插件（已精简） ==="
+          # 5. 追加 LuCI 和你需要的插件（已移除不存在的 geoview）
+          cat >> .config <<EOF
           # LuCI 网页后台基础全家桶
           CONFIG_PACKAGE_luci=y
           CONFIG_LUCI_LANG_zh_Hans=y
           CONFIG_PACKAGE_luci-theme-bootstrap=y
           
-          # 核心插件集成
+          # 核心网络插件集成
           CONFIG_PACKAGE_luci-app-passwall=y
           CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y
           CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y
-          # 🎯 吸收建议 2：删除了不存在的 geoview，依赖交给 passwall 自动处理
-          
           CONFIG_PACKAGE_luci-app-easytier=y
           CONFIG_PACKAGE_kmod-tun=y
           CONFIG_PACKAGE_kmod-nft-fullcone=y
@@ -121,24 +160,12 @@ jobs:
           # CONFIG_PACKAGE_tailscale is not set
           EOF
           
-          # 3. 展开配置
-          make defconfig
-          
-          echo "=== 🧹 屏蔽同架构无关路由器 ==="
-          # 为了只编译 Q30 Pro，把自动带出来的同芯片其他几十个路由器拉黑
-          grep "CONFIG_TARGET_DEVICE_.*=y" .config | grep -v "jcg_q30-pro-ubootmod" | cut -d '=' -f 1 | while read -r dev; do
-            sed -i "s/${dev}=y/# ${dev} is not set/g" .config
-          done
-          
-          # 4. 终极固化
+          # 6. 终极固化配置
           make defconfig
           
           echo "=== 🛡️ 编译前终极校验 ==="
-          # 校验是否成功锁定 ubootmod 大分区变体
-          if ! grep -q "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_jcg_q30-pro-ubootmod=y" .config; then
-             echo "❌ 致命错误：大分区设备变量被清除！大概率是源码中没有这个 -ubootmod 后缀！"
-             echo "当前可用的 q30 相关设备有："
-             grep -i "q30" tmp/.config-target.in || true
+          if ! grep -q "CONFIG_${JCG_VAR}=y" .config; then
+             echo "❌ 致命错误：设备变量 CONFIG_${JCG_VAR} 在最终固化时丢失！"
              exit 1
           fi
           
@@ -147,7 +174,7 @@ jobs:
              exit 1
           fi
           
-          echo "✅ 完美校验通过！大分区匹配，依赖精简完毕！🚀"
+          echo "✅ 恭喜！完美通过终极校验！架构、合法下划线变量、LuCI界面及依赖已全部就绪！🚀"
 
       - name: Download package sources
         run: |
