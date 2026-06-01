@@ -66,12 +66,20 @@ jobs:
         run: |
           cd openwrt
           
-          # 1. 彻底清场，运行一次默认配置以生成底层架构索引文件 tmp/.config-target.in
+          # 1. 彻底清场
           rm -rf .config tmp
+          
+          echo "=== 🎯 修复 DeepSeek 发现的致命细节：预先注入基础架构 ==="
+          # 在运行第一次 defconfig 之前，必须先明确告诉系统我们要编译联发科 Filogic 架构
+          # 这样系统才不会报错，并且能顺利生成该架构下的所有路由器底层索引
+          echo "CONFIG_TARGET_mediatek=y" > .config
+          echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+          
+          # 2. 此时架构已锁定，运行 defconfig 绝对不会报错，并安全生成 tmp/ 索引文件
           make defconfig
           
           echo "=== 🕵️ 智能精准抓取设备变量（严格遵循下划线规范） ==="
-          # 优先级 1：优先抓取大分区变体 ubootmod（去掉了连字符 - 隐患，只匹配下划线和字母数字）
+          # 优先级 1：优先抓取大分区变体 ubootmod（严格排除了连字符 - 隐患）
           JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*q30[a-zA-Z0-9_]*ubootmod' tmp/.config-target.in | head -n1)
           
           # 优先级 2：如果源码里没有单独的 ubootmod 变体，则抓取普通的 pro 变体
@@ -91,22 +99,10 @@ jobs:
           
           echo "✅ 成功捕获源码中的标准 Kconfig 变量: CONFIG_${JCG_VAR}"
           
-          # 2. 动态反向推导它的父级架构（Target 和 Subtarget）
-          SUBTARGET_VAR=$(echo "$JCG_VAR" | sed -n 's/TARGET_DEVICE_\(.*\)_DEVICE_.*/TARGET_\1/p')
-          TARGET_VAR=$(echo "$SUBTARGET_VAR" | sed -n 's/\(TARGET_[^_]*\).*/\1/p')
-          
-          echo "🎯 推导出的父级目标: CONFIG_${TARGET_VAR}"
-          echo "🎯 推导出的子级目标: CONFIG_${SUBTARGET_VAR}"
-          
-          # 3. 彻底清空舊 .config，直接喂给系统最核心的三个架构变量
-          rm -f .config
-          touch .config
-          
+          echo "=== ✍️ 追加注入具体设备变量与核心插件 ==="
+          # 3. 注意：因为前面已经创建了 .config，这里必须用 >> 进行追加写入
           cat >> .config <<EOF
-          CONFIG_${TARGET_VAR}=y
-          CONFIG_${SUBTARGET_VAR}=y
-          # 🎯 吸收 DeepSeek 完美建议：绝不开启 MULTI_PROFILE！
-          # 利用 Kconfig 原生单选 Choice 机制，让系统自动帮我们屏蔽同芯片的其他几十款路由器！
+          # 精准锁定捕获到的路由器型号
           CONFIG_${JCG_VAR}=y
           
           # LuCI 网页后台基础全家桶
@@ -114,7 +110,7 @@ jobs:
           CONFIG_LUCI_LANG_zh_Hans=y
           CONFIG_PACKAGE_luci-theme-bootstrap=y
           
-          # 核心网络插件集成（已移除不存在的 geoview，依赖完全交由 passwall 自动处理）
+          # 核心网络插件集成（依赖完全交由 passwall 自动处理）
           CONFIG_PACKAGE_luci-app-passwall=y
           CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y
           CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y
@@ -123,7 +119,9 @@ jobs:
           CONFIG_PACKAGE_kmod-nft-fullcone=y
           EOF
           
-          # 4. 终极固化配置（Kconfig 此时会自动把其他几十款无关路由器设置为 # ... is not set）
+          # 4. 终极固化配置
+          # 此时由于未开启 MULTI_PROFILE，Kconfig 的原生 Choice 单选机制被完美激活
+          # 系统会自动把同芯片的其他几十款无关路由器全部关闭（自动设置为 # ... is not set）
           make defconfig
           
           echo "=== 🛡️ 编译前终极校验 ==="
@@ -137,10 +135,10 @@ jobs:
              exit 1
           fi
           
-          echo "=== 📋 实际激活的设备目标（用于肉眼双检） ==="
+          echo "=== 📋 实际激活的唯一设备目标（用于肉眼双检） ==="
           grep "CONFIG_TARGET_DEVICE_.*=y" .config
           
-          echo "✅ 完美！不仅变量合法、依赖精简，而且利用原生 Choice 机制完成了最完美的裁剪！🚀"
+          echo "✅ 完美！先给架构再抓变量，彻底绕过底层报错。原生单选裁剪固件已就绪！🚀"
 
       - name: Download package sources
         run: |
