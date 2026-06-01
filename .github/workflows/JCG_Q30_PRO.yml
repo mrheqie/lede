@@ -71,8 +71,7 @@ jobs:
           make defconfig
           
           echo "=== 🕵️ 智能精准抓取设备变量（严格遵循下划线规范） ==="
-          # 🎯 吸收 DeepSeek 建议：Kconfig 变量只允许下划线 _，因此匹配符去掉了 -
-          # 优先级 1：优先抓取大分区变体 ubootmod
+          # 优先级 1：优先抓取大分区变体 ubootmod（去掉了连字符 - 隐患，只匹配下划线和字母数字）
           JCG_VAR=$(grep -o 'TARGET_DEVICE_[a-zA-Z0-9_]*q30[a-zA-Z0-9_]*ubootmod' tmp/.config-target.in | head -n1)
           
           # 优先级 2：如果源码里没有单独的 ubootmod 变体，则抓取普通的 pro 变体
@@ -87,8 +86,6 @@ jobs:
           
           if [ -z "$JCG_VAR" ]; then
             echo "❌ 致命错误：在源码中完全找不到任何与 q30 相关的符合 Kconfig 规范的符号！"
-            echo "以下是 tmp/.config-target.in 中包含 mediatek 的部分内容供排查："
-            grep -i "mediatek" tmp/.config-target.in | head -n 30 || true
             exit 1
           fi
           
@@ -101,66 +98,32 @@ jobs:
           echo "🎯 推导出的父级目标: CONFIG_${TARGET_VAR}"
           echo "🎯 推导出的子级目标: CONFIG_${SUBTARGET_VAR}"
           
-          # 3. 彻底清空舊 .config，开始写入我们捕获到的纯正变量
+          # 3. 彻底清空舊 .config，直接喂给系统最核心的三个架构变量
           rm -f .config
           touch .config
           
           cat >> .config <<EOF
           CONFIG_${TARGET_VAR}=y
           CONFIG_${SUBTARGET_VAR}=y
-          CONFIG_TARGET_MULTI_PROFILE=y
+          # 🎯 吸收 DeepSeek 完美建议：绝不开启 MULTI_PROFILE！
+          # 利用 Kconfig 原生单选 Choice 机制，让系统自动帮我们屏蔽同芯片的其他几十款路由器！
           CONFIG_${JCG_VAR}=y
-          EOF
           
-          # 4. 运行 defconfig 让系统基于这四个变量自动扩展出同芯片的全量设备
-          make defconfig
-          
-          echo "=== 🧹 屏蔽同架构无关路由器 ==="
-          # 将自动带出来的其他几十款路由器（如小米、红米等）精准切除，只保留我们的 JCG 目标
-          grep "CONFIG_TARGET_DEVICE_.*=y" .config | grep -v "${JCG_VAR}" | cut -d '=' -f 1 | while read -r dev; do
-            sed -i "s/${dev}=y/# ${dev} is not set/g" .config
-          done
-          
-          echo "=== ✍️ 注入网页后台与核心插件（已精简） ==="
-          # 5. 追加 LuCI 和你需要的插件（已移除不存在的 geoview）
-          cat >> .config <<EOF
           # LuCI 网页后台基础全家桶
           CONFIG_PACKAGE_luci=y
           CONFIG_LUCI_LANG_zh_Hans=y
           CONFIG_PACKAGE_luci-theme-bootstrap=y
           
-          # 核心网络插件集成
+          # 核心网络插件集成（已移除不存在的 geoview，依赖完全交由 passwall 自动处理）
           CONFIG_PACKAGE_luci-app-passwall=y
           CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y
           CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y
           CONFIG_PACKAGE_luci-app-easytier=y
           CONFIG_PACKAGE_kmod-tun=y
           CONFIG_PACKAGE_kmod-nft-fullcone=y
-          
-          # 强制拉黑所有不需要的大型垃圾插件
-          # CONFIG_PACKAGE_luci-app-aria2 is not set
-          # CONFIG_PACKAGE_aria2 is not set
-          # CONFIG_PACKAGE_luci-app-transmission is not set
-          # CONFIG_PACKAGE_transmission-daemon is not set
-          # CONFIG_PACKAGE_transmission-web is not set
-          # CONFIG_PACKAGE_luci-app-qbittorrent is not set
-          # CONFIG_PACKAGE_qbittorrent is not set
-          # CONFIG_PACKAGE_luci-app-samba4 is not set
-          # CONFIG_PACKAGE_samba4-server is not set
-          # CONFIG_PACKAGE_samba4-libs is not set
-          # CONFIG_PACKAGE_luci-app-minidlna is not set
-          # CONFIG_PACKAGE_minidlna is not set
-          # CONFIG_PACKAGE_luci-app-filemanager is not set
-          # CONFIG_PACKAGE_dufs is not set
-          # CONFIG_PACKAGE_luci-app-dae is not set
-          # CONFIG_PACKAGE_dae is not set
-          # CONFIG_PACKAGE_luci-app-openclash is not set
-          # CONFIG_PACKAGE_luci-app-softether is not set
-          # CONFIG_PACKAGE_luci-app-tailscale is not set
-          # CONFIG_PACKAGE_tailscale is not set
           EOF
           
-          # 6. 终极固化配置
+          # 4. 终极固化配置（Kconfig 此时会自动把其他几十款无关路由器设置为 # ... is not set）
           make defconfig
           
           echo "=== 🛡️ 编译前终极校验 ==="
@@ -174,7 +137,10 @@ jobs:
              exit 1
           fi
           
-          echo "✅ 恭喜！完美通过终极校验！架构、合法下划线变量、LuCI界面及依赖已全部就绪！🚀"
+          echo "=== 📋 实际激活的设备目标（用于肉眼双检） ==="
+          grep "CONFIG_TARGET_DEVICE_.*=y" .config
+          
+          echo "✅ 完美！不仅变量合法、依赖精简，而且利用原生 Choice 机制完成了最完美的裁剪！🚀"
 
       - name: Download package sources
         run: |
