@@ -82,13 +82,32 @@ jobs:
           CONFIG_LUCI_LANG_zh_Hans=y
           CONFIG_PACKAGE_luci-theme-bootstrap=y
           CONFIG_PACKAGE_luci-app-passwall=y
-          CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y
+          CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=n
           CONFIG_PACKAGE_luci-app-passwall_INCLUDE_SingBox=y
           CONFIG_PACKAGE_luci-app-easytier=y
           CONFIG_PACKAGE_kmod-tun=y
           CONFIG_PACKAGE_kmod-nft-fullcone=y
           EOF
           
+         
+
+          # 使用显式关闭代替删除，这在 Kconfig 机制下更安全
+          echo "=== 正在禁用多余的驱动模块 ==="
+          {
+            echo "CONFIG_PACKAGE_kmod-usb-storage=n"
+            echo "CONFIG_PACKAGE_kmod-usb-serial=n"
+            echo "CONFIG_PACKAGE_kmod-usb-net=n"
+            echo "CONFIG_PACKAGE_kmod-fs-ntfs=n"
+            echo "CONFIG_PACKAGE_kmod-fs-exfat=n"
+            echo "CONFIG_PACKAGE_kmod-input-core=n"
+          } >> .config
+
+          # 关闭调试符号
+          {
+            echo "CONFIG_DEBUG_FS=n"
+            echo "CONFIG_DEBUG_KERNEL=n"
+            echo "CONFIG_DEBUG_INFO=n"
+          } >> .config
           echo "=== 3. 执行单次 defconfig 固化依赖 ==="
           make defconfig
           
