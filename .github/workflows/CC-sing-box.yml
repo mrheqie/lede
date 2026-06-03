@@ -115,43 +115,50 @@ jobs:
         echo "# CONFIG_PACKAGE_luci-mod-status is not set" >> .config
         echo "# CONFIG_PACKAGE_collectd is not set" >> .config
         
-        # 6. 魔改 Sing-box Makefile (★ 强制净化 + 通用适配版)
-        echo "=== 正在执行 Sing-box 协议补全与验证 ==="
+        # 6. 魔改 Sing-box Makefile (★ 精准切除条件片段 + 强制注入)
+        echo "=== 正在执行 Sing-box 条件片段精准切除 ==="
         
         if [ -f "package/homeproxy/files/usr/bin/sing-box" ] || [ -f "package/homeproxy/root/usr/bin/sing-box" ]; then
-            echo "❌ 致命拦截：检测到预置二进制，裁剪失效！"
+            echo "❌ 致命拦截：检测到预置二进制"
             exit 1
         fi
         
         SING_MAKEFILES=$(find ./feeds ./package -type f -path "*/sing-box/Makefile")
         if [ -z "$SING_MAKEFILES" ]; then
-            echo "❌ 致命错误：未找到任何 sing-box Makefile！"
+            echo "❌ 未找到 sing-box Makefile"
             exit 1
         fi
         
         for mk in $SING_MAKEFILES; do
-            echo "-> 正在净化目标: $mk"
-            # 删除所有包含禁用标签的 GO_PKG_TAGS 或 SING 开头的行
-            sed -i '/^GO_PKG_TAGS.*with_gvisor/d; /^GO_PKG_TAGS.*with_wireguard/d; /^GO_PKG_TAGS.*with_quic/d; /^GO_PKG_TAGS.*with_v2ray/d' "$mk"
-            sed -i '/^SING.*TAGS.*with_gvisor/d; /^SING.*TAGS.*with_wireguard/d; /^SING.*TAGS.*with_quic/d; /^SING.*TAGS.*with_v2ray/d' "$mk"
-            # 追加我们的极简标签（Makefile 中后定义的变量会覆盖前面的）
-            echo "GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks" >> "$mk"
-            echo "✅ 已强制注入新标签"
+            echo "-> 正在手术切除 $mk 中的巨型组件条件"
+            
+            # 1. 直接删除所有 $(if $(CONFIG_...with_gvisor)...) 这样的条件片段（不管嵌套）
+            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_GVISOR),with_gvisor)//g' "$mk"
+            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_QUIC),with_quic)//g' "$mk"
+            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_V2RAY_API),with_v2ray_api)//g' "$mk"
+            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_WIREGUARD),with_wireguard)//g' "$mk"
+            
+            # 2. 注释掉包含这些关键词的整行（防止还有硬编码的 with_gvisor 等独立标签）
+            sed -i '/with_gvisor\|with_quic\|with_v2ray_api\|with_wireguard/s/^/#/' "$mk"
+            
+            # 3. 在文件末尾强制追加最终极简标签（Make 后定义的变量会覆盖前面）
+            echo "override GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks" >> "$mk"
+            echo "✅ 手术成功，已注入 override 标签"
         done
         
-        # 最终验证
-        if grep -qE "with_gvisor|with_wireguard|with_quic|with_v2ray" $SING_MAKEFILES; then
-            echo "❌ 严重警告：仍有未剥离的大型组件！"
-            grep -n -E "with_gvisor|with_wireguard|with_quic|with_v2ray" $SING_MAKEFILES
+        # 最终验证：检查非注释行中是否还有禁用标签
+        if grep -v "^#" $SING_MAKEFILES | grep -qE "with_gvisor|with_wireguard|with_quic|with_v2ray"; then
+            echo "❌ 严重警告：非注释行中仍有巨型组件！"
+            grep -v "^#" $SING_MAKEFILES | grep -nE "with_gvisor|with_wireguard|with_quic|with_v2ray"
             exit 1
         fi
         
-        if ! grep -q "with_anytls" $SING_MAKEFILES || ! grep -q "with_shadowsocks" $SING_MAKEFILES; then
-            echo "❌ 致命错误：AnyTLS 或 Shadowsocks 出站支持标签丢失！"
+        if ! grep -v "^#" $SING_MAKEFILES | grep -q "with_anytls" || ! grep -v "^#" $SING_MAKEFILES | grep -q "with_shadowsocks"; then
+            echo "❌ 致命错误：AnyTLS 或 Shadowsocks 协议标签丢失！"
             exit 1
         fi
         
-        echo "✅ 协议集成验证完成，Sing-box 净化成功。"
+        echo "✅ 协议集成验证通过，Sing-box 净化成功。"
         
         # 7. 生成最终依赖
         make defconfig
