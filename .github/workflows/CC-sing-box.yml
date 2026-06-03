@@ -115,7 +115,7 @@ jobs:
         echo "# CONFIG_PACKAGE_luci-mod-status is not set" >> .config
         echo "# CONFIG_PACKAGE_collectd is not set" >> .config
         
-        # 6. 魔改 Sing-box Makefile (★ 精准切除 + PostPrepare 删除 tailscale)
+        # 6. 魔改 Sing-box Makefile (★ 精准切除 + 强制注入标签)
         echo "=== 正在执行 Sing-box 条件片段精准切除 ==="
         
         if [ -f "package/homeproxy/files/usr/bin/sing-box" ] || [ -f "package/homeproxy/root/usr/bin/sing-box" ]; then
@@ -130,43 +130,33 @@ jobs:
         fi
         
         for mk in $SING_MAKEFILES; do
-            echo "-> 正在手术切除 $mk 中的巨型组件条件并设置 tailscale 删除钩子"
-            
-            # 1. 删除所有 $(if $(CONFIG_...with_gvisor)...) 条件片段
+            echo "-> 正在手术切除 $mk 中的巨型组件条件"
+            # 删除 $(if ...) 片段
             sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_GVISOR),with_gvisor)//g' "$mk"
             sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_QUIC),with_quic)//g' "$mk"
             sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_V2RAY_API),with_v2ray_api)//g' "$mk"
             sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_WIREGUARD),with_wireguard)//g' "$mk"
             
-            # 2. 注释掉包含禁用标签关键词的整行（防止硬编码）
+            # 注释掉含禁用标签的硬编码行
             sed -i '/with_gvisor\|with_quic\|with_v2ray_api\|with_wireguard/s/^/#/' "$mk"
             
-            # 3. 追加 Build/PostPrepare 钩子，在编译前删除 tailscale 源码（根治编译错误）
-            cat >> "$mk" <<'EOF'
-        
-        define Build/PostPrepare
-        	rm -rf $(PKG_BUILD_DIR)/protocol/tailscale
-        endef
-        EOF
-            
-            # 4. 在文件末尾强制追加最终极简标签（override 确保覆盖所有定义）
+            # 追加 override 标签
             echo "override GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks" >> "$mk"
-            echo "✅ 手术成功，已注入 override 标签并设置 tailscale 删除钩子"
+            echo "✅ 手术成功"
         done
         
-        # 最终验证：检查非注释行中是否还有禁用标签
+        # 验证非注释行无残留
         if grep -v "^#" $SING_MAKEFILES | grep -qE "with_gvisor|with_wireguard|with_quic|with_v2ray"; then
-            echo "❌ 严重警告：非注释行中仍有巨型组件！"
-            grep -v "^#" $SING_MAKEFILES | grep -nE "with_gvisor|with_wireguard|with_quic|with_v2ray"
+            echo "❌ 仍有巨型组件残留"
             exit 1
         fi
         
         if ! grep -v "^#" $SING_MAKEFILES | grep -q "with_anytls" || ! grep -v "^#" $SING_MAKEFILES | grep -q "with_shadowsocks"; then
-            echo "❌ 致命错误：AnyTLS 或 Shadowsocks 协议标签丢失！"
+            echo "❌ 协议标签丢失"
             exit 1
         fi
         
-        echo "✅ 协议集成验证通过，Sing-box 净化成功。"
+        echo "✅ 标签净化验证通过。"
         
         # 7. 生成最终依赖
         make defconfig
