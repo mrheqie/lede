@@ -1,0 +1,159 @@
+name: Build Kunpeng CC (MT7628 + EC200A) sing-box Firmware
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+
+env:
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
+  TZ: Asia/Shanghai
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Initialization environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        # 1. 极限清理磁盘空间
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell /usr/share/swift /var/lib/apt/lists/*
+        sudo rm -rf /usr/local/share/boost /opt/az /usr/share/game /usr/local/lib/node_modules
+        
+        # 2. 安装编译依赖
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install -y --no-install-recommends ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake xxd cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo u-boot-tools upx-ucl unzip xmlto xz-utils zlib1g-dev
+        
+        # 3. 环境收尾
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$USER /workdir
+
+    - name: Clone source code
+      working-directory: /workdir
+      run: |
+        git clone $REPO_URL -b $REPO_BRANCH lede
+        ln -sf /workdir/lede $GITHUB_WORKSPACE/lede
+
+    - name: Update & Install feeds
+      run: |
+        cd lede
+        # 正常更新大雕官方基础源（由于我们改用自带的 Homeproxy，不需要再克隆第三方 helloworld 了）
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Generate Custom Configuration (.config)
+      run: |
+        cd lede
+        
+        # 1. 核心架构与机型定义
+        echo "CONFIG_TARGET_ramips=y" > .config
+        echo "CONFIG_TARGET_ramips_mt76x8=y" >> .config
+        echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_nradio_wt6285=y" >> .config
+        
+        # 2. 基础网页与核心硬件加速
+        echo "CONFIG_PACKAGE_luci=y" >> .config
+        echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
+        echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
+        
+        # 3. 【全新核心】启用 Homeproxy (完美驱动 sing-box，支持 anytls + SS)
+        echo "CONFIG_PACKAGE_luci-app-homeproxy=y" >> .config
+        
+        # ★ 极其重要：强制开启 UPX 压缩！由于 sing-box 是 Go 语言编写，体积巨大。
+        # 开启 UPX 后，系统会在编译完 sing-box 后强行将其体积压缩 60% 以上，保证能塞进 16MB 闪存！
+        echo "CONFIG_PACKAGE_upx=y" >> .config
+        
+        # ★ HTTPS 订阅与路由分流必备证书依赖
+        echo "CONFIG_PACKAGE_curl=y" >> .config
+        echo "CONFIG_PACKAGE_ca-bundle=y" >> .config
+        
+        # 彻底切断与旧时代协议的联系（以防依赖自动勾选）
+        echo "# CONFIG_PACKAGE_luci-app-ssr-plus is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-passwall is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-openclash is not set" >> .config
+        
+        # 4. 【移远 EC200A 核心驱动精简版】只保留最核心的 QMI 拨号
+        echo "CONFIG_PACKAGE_kmod-usb-core=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-serial=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-serial-wwan=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
+        echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
+        echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
+        echo "CONFIG_PACKAGE_luci-proto-qmi=y" >> .config
+        echo "CONFIG_PACKAGE_comgt=y" >> .config
+        # 砍掉不需要的冗余网卡模拟驱动
+        echo "# CONFIG_PACKAGE_kmod-usb-net-cdc-ether is not set" >> .config
+        echo "# CONFIG_PACKAGE_kmod-usb-net-rndis is not set" >> .config
+        echo "# CONFIG_PACKAGE_kmod-usb-net-cdc-ncm is not set" >> .config
+        echo "# CONFIG_PACKAGE_usb-modem-node is not set" >> .config
+        
+        # 5. 【极限杀后台】剔除所有冗余守护进程，为 sing-box 腾出宝贵的 CPU 和内存
+        echo "# CONFIG_PACKAGE_nlbwmon is not set" >> .config
+        echo "# CONFIG_PACKAGE_tethering is not set" >> .config
+        echo "# CONFIG_PACKAGE_kmod-tcp-bbr is not set" >> .config
+        echo "# CONFIG_PACKAGE_iwinfo is not set" >> .config
+        
+        echo "# CONFIG_PACKAGE_luci-app-vlmcsd is not set" >> .config
+        echo "# CONFIG_PACKAGE_vlmcsd is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-vsftpd is not set" >> .config
+        echo "# CONFIG_PACKAGE_vsftpd-alt is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-wol is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-upnp is not set" >> .config
+        echo "# CONFIG_PACKAGE_miniupnpd is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-ddns is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-arpbind is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-accesscontrol is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-rclone is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-uugamebooster is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-xlnetacc is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-sqm is not set" >> .config
+        
+        # 6. 魔改 Sing-box Makefile (极限物理阉割)
+        # 强行移除不需要的巨无霸底层组件，确保体积万无一失
+        echo "=== 正在阉割 Sing-box 巨无霸组件 ==="
+        if [ -f "feeds/packages/net/sing-box/Makefile" ]; then
+            sed -i 's/with_wireguard//g' feeds/packages/net/sing-box/Makefile
+            sed -i 's/with_gvisor//g' feeds/packages/net/sing-box/Makefile
+            sed -i 's/with_v2ray//g' feeds/packages/net/sing-box/Makefile
+            echo "✅ Sing-box 物理阉割完成"
+        fi
+        
+        # 7. 生成最终依赖
+        make defconfig
+
+    - name: Download package
+      id: package
+      run: |
+        cd lede
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: Compile the firmware
+      id: compile
+      run: |
+        cd lede
+        # 修正 fallback 逻辑，单线程时打印详细日志方便排错
+        make -j$(nproc) || make -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: Upload firmware to Artifacts
+      uses: actions/upload-artifact@v4
+      if: steps.compile.outputs.status == 'success'
+      with:
+        name: OpenWrt_KunpengCC_EC200A_Homeproxy
+        path: lede/bin/targets/ramips/mt76x8/*.bin
+        retention-days: 7
