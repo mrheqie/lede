@@ -115,8 +115,8 @@ jobs:
         echo "# CONFIG_PACKAGE_luci-mod-status is not set" >> .config
         echo "# CONFIG_PACKAGE_collectd is not set" >> .config
         
-        # 6. 魔改 Sing-box Makefile (★ 标签净化 + PostExtract 强制删除 tailscale)
-        echo "=== 正在执行 Sing-box 净化与 tailscale 物理切除 ==="
+        # 6. 魔改 Sing-box Makefile (★ 强制覆盖 Build/Compile 切除 tailscale)
+        echo "=== 正在执行 Sing-box 净化与 tailscale 强制切除 ==="
         
         if [ -f "package/homeproxy/files/usr/bin/sing-box" ] || [ -f "package/homeproxy/root/usr/bin/sing-box" ]; then
             echo "❌ 致命拦截：检测到预置二进制"
@@ -130,7 +130,7 @@ jobs:
         fi
         
         for mk in $SING_MAKEFILES; do
-            echo "-> 正在手术切除 $mk 中的巨型组件并植入 PostExtract 删除逻辑"
+            echo "-> 正在手术切除 $mk 中的巨型组件并改写 Build/Compile"
         
             # 1. 删除 $(if $(CONFIG_...)...) 条件片段
             sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_GVISOR),with_gvisor)//g' "$mk"
@@ -138,32 +138,30 @@ jobs:
             sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_V2RAY_API),with_v2ray_api)//g' "$mk"
             sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_WIREGUARD),with_wireguard)//g' "$mk"
         
-            # 2. 注释掉含禁用标签的硬编码行
-            sed -i '/with_gvisor\|with_quic\|with_v2ray_api\|with_wireguard/s/^/#/' "$mk"
+            # 2. 注释掉含禁用标签的硬编码行（包括 tailscale）
+            sed -i '/with_gvisor\|with_quic\|with_v2ray_api\|with_wireguard\|with_tailscale/s/^/#/' "$mk"
         
-            # 3. 追加 override 标签
+            # 3. 追加 override 标签（强制只编译所需协议）
             echo "override GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks" >> "$mk"
         
-            # 4. 【终极根治】追加 Build/PostExtract 钩子，在解压后立即删除 tailscale 目录
-            #    无论源码解压多少次，这个钩子都会被调用，确保目录不存在
-            if ! grep -q '^define Build/PostExtract' "$mk"; then
-                cat >> "$mk" <<'EOF'
+            # 4. 删除原有的 Build/Compile 定义（如果有），然后强制写入新的
+            sed -i '/^define Build\/Compile/,/^endef/d' "$mk"
         
-        define Build/PostExtract
+            cat >> "$mk" <<'EOF'
+        
+        define Build/Compile
         	rm -rf $(PKG_BUILD_DIR)/protocol/tailscale
+        	$(call Build/Compile/Default)
         endef
         EOF
-            else
-                # 如果已有 PostExtract，则在其中插入删除命令（防止重复定义）
-                sed -i '/^define Build\/PostExtract/a\	rm -rf $(PKG_BUILD_DIR)/protocol/tailscale' "$mk"
-            fi
         
-            echo "✅ 手术成功，已注入 PostExtract 删除钩子"
+            echo "✅ 手术成功，已强制覆盖 Build/Compile 并植入 tailscale 删除"
         done
         
-        # 验证非注释行无残留巨型标签
-        if grep -v "^#" $SING_MAKEFILES | grep -qE "with_gvisor|with_wireguard|with_quic|with_v2ray"; then
-            echo "❌ 仍有巨型组件残留"
+        # 验证非注释行无残留禁用标签
+        if grep -v "^#" $SING_MAKEFILES | grep -qE "with_gvisor|with_wireguard|with_quic|with_v2ray|with_tailscale"; then
+            echo "❌ 仍有禁用组件残留"
+            grep -v "^#" $SING_MAKEFILES | grep -nE "with_gvisor|with_wireguard|with_quic|with_v2ray|with_tailscale"
             exit 1
         fi
         
