@@ -116,7 +116,7 @@ jobs:
         # 6. 魔改 Sing-box Makefile (★ 终极协议补全 + 验证版)
         echo "=== 正在执行 Sing-box 协议补全与验证 ==="
         
-        # 1. 安全排查：防止被预置二进制欺骗
+        # 安全排查：防止被预置二进制欺骗
         if [ -f "package/homeproxy/files/usr/bin/sing-box" ] || [ -f "package/homeproxy/root/usr/bin/sing-box" ]; then
             echo "❌ 致命拦截：检测到预置二进制，裁剪失效！"
             exit 1
@@ -128,23 +128,18 @@ jobs:
             exit 1
         fi
         
-        # 2. 精准手术：强制重写编译标签
+        # 精准手术：强制重写编译标签（只保留最小必要集合）
         for mk in $SING_MAKEFILES; do
             echo "-> 正在净化目标: $mk"
-            # 补齐所有核心功能标签：utls(指纹), anytls(核心), shadowsocks(机场), reality(AnyTLS依赖), tls(基础)
-            sed -i '/GO_PKG_TAGS\|SING_BOX_TAGS/c\GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks,with_reality,with_tls' "$mk"
-            
-            # 兜底清理所有会撑爆 16MB 的巨型组件
-            sed -i 's/^.*with_gvisor.*$//g; s/^.*with_wireguard.*$//g; s/^.*with_quic.*$//g; s/^.*with_v2ray.*$//g; s/^.*with_clash_api.*$//g' "$mk"
+            sed -i '/GO_PKG_TAGS\|SING_BOX_TAGS/c\GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks' "$mk"
         done
         
-        # 3. 最终验证：逻辑闭环检查
+        # 最终验证
         if grep -qE "with_gvisor|with_wireguard|with_quic|with_v2ray" $SING_MAKEFILES; then
             echo "❌ 严重警告：仍有未剥离的大型组件！"
             exit 1
         fi
         
-        # 强制检查必须存在的协议标签
         if ! grep -q "with_anytls" $SING_MAKEFILES || ! grep -q "with_shadowsocks" $SING_MAKEFILES; then
             echo "❌ 致命错误：AnyTLS 或 Shadowsocks 出站支持标签丢失！"
             exit 1
