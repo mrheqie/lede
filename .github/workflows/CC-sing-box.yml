@@ -22,15 +22,10 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        # 1. 极限清理磁盘空间
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell /usr/share/swift /var/lib/apt/lists/*
         sudo rm -rf /usr/local/share/boost /opt/az /usr/share/game /usr/local/lib/node_modules
-        
-        # 2. 安装编译依赖
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install -y --no-install-recommends ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake xxd cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo u-boot-tools upx-ucl unzip xmlto xz-utils zlib1g-dev
-        
-        # 3. 环境收尾
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
@@ -46,15 +41,16 @@ jobs:
     - name: Update & Install feeds
       run: |
         cd lede
-        # 正常更新大雕官方基础源（由于我们改用自带的 Homeproxy，不需要再克隆第三方 helloworld 了）
         ./scripts/feeds update -a
         ./scripts/feeds install -a
+        # 强行拉取 Homeproxy
+        git clone --depth=1 https://github.com/immortalwrt/homeproxy.git package/homeproxy
 
     - name: Generate Custom Configuration (.config)
       run: |
         cd lede
         
-        # 1. 核心架构与机型定义
+        # 1. 核心架构与机型
         echo "CONFIG_TARGET_ramips=y" > .config
         echo "CONFIG_TARGET_ramips_mt76x8=y" >> .config
         echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_nradio_wt6285=y" >> .config
@@ -65,24 +61,21 @@ jobs:
         echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
+        echo "CONFIG_PACKAGE_luci-compat=y" >> .config
         
-        # 3. 【全新核心】启用 Homeproxy (完美驱动 sing-box，支持 anytls + SS)
+        # 3. 【代理核心】启用 Homeproxy 与 Sing-box
         echo "CONFIG_PACKAGE_luci-app-homeproxy=y" >> .config
-        
-        # ★ 极其重要：强制开启 UPX 压缩！由于 sing-box 是 Go 语言编写，体积巨大。
-        # 开启 UPX 后，系统会在编译完 sing-box 后强行将其体积压缩 60% 以上，保证能塞进 16MB 闪存！
+        echo "CONFIG_PACKAGE_sing-box=y" >> .config
         echo "CONFIG_PACKAGE_upx=y" >> .config
-        
-        # ★ HTTPS 订阅与路由分流必备证书依赖
         echo "CONFIG_PACKAGE_curl=y" >> .config
         echo "CONFIG_PACKAGE_ca-bundle=y" >> .config
         
-        # 彻底切断与旧时代协议的联系（以防依赖自动勾选）
+        # 彻底切断旧时代协议依赖
         echo "# CONFIG_PACKAGE_luci-app-ssr-plus is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-passwall is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-openclash is not set" >> .config
         
-        # 4. 【移远 EC200A 核心驱动精简版】只保留最核心的 QMI 拨号
+        # 4. 【4G 驱动与核心工具】保留 QMI
         echo "CONFIG_PACKAGE_kmod-usb-core=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
@@ -94,18 +87,17 @@ jobs:
         echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
         echo "CONFIG_PACKAGE_luci-proto-qmi=y" >> .config
         echo "CONFIG_PACKAGE_comgt=y" >> .config
-        # 砍掉不需要的冗余网卡模拟驱动
+        echo "CONFIG_PACKAGE_uqmi=y" >> .config
+        
+        # 砍掉网卡模拟冗余
         echo "# CONFIG_PACKAGE_kmod-usb-net-cdc-ether is not set" >> .config
         echo "# CONFIG_PACKAGE_kmod-usb-net-rndis is not set" >> .config
         echo "# CONFIG_PACKAGE_kmod-usb-net-cdc-ncm is not set" >> .config
         echo "# CONFIG_PACKAGE_usb-modem-node is not set" >> .config
         
-        # 5. 【极限杀后台】剔除所有冗余守护进程，为 sing-box 腾出宝贵的 CPU 和内存
+        # 5. 【极限杀后台】
         echo "# CONFIG_PACKAGE_nlbwmon is not set" >> .config
         echo "# CONFIG_PACKAGE_tethering is not set" >> .config
-        echo "# CONFIG_PACKAGE_kmod-tcp-bbr is not set" >> .config
-        echo "# CONFIG_PACKAGE_iwinfo is not set" >> .config
-        
         echo "# CONFIG_PACKAGE_luci-app-vlmcsd is not set" >> .config
         echo "# CONFIG_PACKAGE_vlmcsd is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-vsftpd is not set" >> .config
@@ -121,15 +113,41 @@ jobs:
         echo "# CONFIG_PACKAGE_luci-app-xlnetacc is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-sqm is not set" >> .config
         
-        # 6. 魔改 Sing-box Makefile (极限物理阉割)
-        # 强行移除不需要的巨无霸底层组件，确保体积万无一失
-        echo "=== 正在阉割 Sing-box 巨无霸组件 ==="
-        if [ -f "feeds/packages/net/sing-box/Makefile" ]; then
-            sed -i 's/with_wireguard//g' feeds/packages/net/sing-box/Makefile
-            sed -i 's/with_gvisor//g' feeds/packages/net/sing-box/Makefile
-            sed -i 's/with_v2ray//g' feeds/packages/net/sing-box/Makefile
-            echo "✅ Sing-box 物理阉割完成"
+        # 6. 魔改 Sing-box Makefile (★ 终极净化 + 协议保留版)
+        echo "=== 正在执行 Sing-box 极限协议净化 ==="
+        
+        # 排查是否包含预置二进制（防止 Makefile 修改无效）
+        if [ -f "package/homeproxy/files/usr/bin/sing-box" ] || [ -f "package/homeproxy/root/usr/bin/sing-box" ]; then
+            echo "❌ 致命拦截：Homeproxy 已包含预置的 sing-box 二进制，体积无法通过 Makefile 控制，请手动替换！"
+            exit 1
         fi
+        
+        SING_MAKEFILES=$(find ./feeds ./package -type f -path "*/sing-box/Makefile")
+        if [ -z "$SING_MAKEFILES" ]; then
+            echo "❌ 致命错误：未找到任何 sing-box Makefile！"
+            exit 1
+        fi
+        
+        for mk in $SING_MAKEFILES; do
+            echo "-> 正在净化目标: $mk"
+            # 逻辑修正：保留 with_utls (TLS伪装) 和 with_shadowsocks (SS协议)，剔除其他巨无霸标签
+            sed -i '/GO_PKG_TAGS\|SING_BOX_TAGS/c\GO_PKG_TAGS:=with_utls,with_shadowsocks' "$mk"
+            
+            # 兜底清理可能残留的垃圾标签
+            sed -i 's/^.*with_gvisor.*$//g; s/^.*with_wireguard.*$//g; s/^.*with_quic.*$//g; s/^.*with_v2ray.*$//g; s/^.*with_clash_api.*$//g' "$mk"
+            echo "✅ 标签已重置为: GO_PKG_TAGS:=with_utls,with_shadowsocks"
+        done
+        
+        # 最终安全验证
+        if grep -qE "with_gvisor|with_wireguard|with_quic|with_v2ray" $SING_MAKEFILES; then
+            echo "❌ 严重警告：仍有大型组件残留！"
+            exit 1
+        fi
+        if ! grep -q "with_shadowsocks" $SING_MAKEFILES; then
+            echo "❌ 严重警告：Shadowsocks 支持丢失！"
+            exit 1
+        fi
+        echo "✅ Sing-box 协议完整性验证通过。"
         
         # 7. 生成最终依赖
         make defconfig
@@ -146,14 +164,29 @@ jobs:
       id: compile
       run: |
         cd lede
-        # 修正 fallback 逻辑，单线程时打印详细日志方便排错
         make -j$(nproc) || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
 
+    # 安全探针：体积超限直接熔断
+    - name: Check Firmware Size (Safety Guard)
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        cd lede/bin/targets/ramips/mt76x8/
+        echo "=== 固件体积报告 ==="
+        ls -lh *sysupgrade*.bin
+        FILE=$(ls *sysupgrade*.bin | head -n 1)
+        SIZE=$(stat -c%s "$FILE")
+        if [ "$SIZE" -gt 16000000 ]; then
+          echo "❌ 致命错误：固件体积高达 $SIZE 字节，超过 16MB 物理限制，强行刷入会导致路由器变砖！"
+          exit 1
+        else
+          echo "✅ 固件体积安全 ($SIZE 字节)，可以放心刷入！"
+        fi
+
     - name: Upload firmware to Artifacts
       uses: actions/upload-artifact@v4
-      if: steps.compile.outputs.status == 'success'
+      if: success()
       with:
-        name: OpenWrt_KunpengCC_EC200A_Homeproxy
-        path: lede/bin/targets/ramips/mt76x8/*.bin
+        name: OpenWrt_KunpengCC_EC200A_Homeproxy_AnyTLS
+        path: lede/bin/targets/ramips/mt76x8/*sysupgrade*.bin
         retention-days: 7
