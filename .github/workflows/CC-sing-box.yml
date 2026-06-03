@@ -112,11 +112,12 @@ jobs:
         echo "# CONFIG_PACKAGE_luci-app-uugamebooster is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-xlnetacc is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-sqm is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-mod-status is not set" >> .config
+        echo "# CONFIG_PACKAGE_collectd is not set" >> .config
         
-        # 6. 魔改 Sing-box Makefile (★ 终极协议补全 + 验证版)
+        # 6. 魔改 Sing-box Makefile (★ 强制净化 + 通用适配版)
         echo "=== 正在执行 Sing-box 协议补全与验证 ==="
         
-        # 安全排查：防止被预置二进制欺骗
         if [ -f "package/homeproxy/files/usr/bin/sing-box" ] || [ -f "package/homeproxy/root/usr/bin/sing-box" ]; then
             echo "❌ 致命拦截：检测到预置二进制，裁剪失效！"
             exit 1
@@ -128,15 +129,20 @@ jobs:
             exit 1
         fi
         
-        # 精准手术：强制重写编译标签（只保留最小必要集合）
         for mk in $SING_MAKEFILES; do
             echo "-> 正在净化目标: $mk"
-            sed -i '/GO_PKG_TAGS\|SING_BOX_TAGS/c\GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks' "$mk"
+            # 删除所有包含禁用标签的 GO_PKG_TAGS 或 SING 开头的行
+            sed -i '/^GO_PKG_TAGS.*with_gvisor/d; /^GO_PKG_TAGS.*with_wireguard/d; /^GO_PKG_TAGS.*with_quic/d; /^GO_PKG_TAGS.*with_v2ray/d' "$mk"
+            sed -i '/^SING.*TAGS.*with_gvisor/d; /^SING.*TAGS.*with_wireguard/d; /^SING.*TAGS.*with_quic/d; /^SING.*TAGS.*with_v2ray/d' "$mk"
+            # 追加我们的极简标签（Makefile 中后定义的变量会覆盖前面的）
+            echo "GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks" >> "$mk"
+            echo "✅ 已强制注入新标签"
         done
         
         # 最终验证
         if grep -qE "with_gvisor|with_wireguard|with_quic|with_v2ray" $SING_MAKEFILES; then
             echo "❌ 严重警告：仍有未剥离的大型组件！"
+            grep -n -E "with_gvisor|with_wireguard|with_quic|with_v2ray" $SING_MAKEFILES
             exit 1
         fi
         
