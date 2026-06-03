@@ -115,7 +115,7 @@ jobs:
         echo "# CONFIG_PACKAGE_luci-mod-status is not set" >> .config
         echo "# CONFIG_PACKAGE_collectd is not set" >> .config
         
-        # 6. 魔改 Sing-box Makefile (★ 精准切除 + 强制删除 tailscale)
+        # 6. 魔改 Sing-box Makefile (★ 精准切除 + PostPrepare 删除 tailscale)
         echo "=== 正在执行 Sing-box 条件片段精准切除 ==="
         
         if [ -f "package/homeproxy/files/usr/bin/sing-box" ] || [ -f "package/homeproxy/root/usr/bin/sing-box" ]; then
@@ -130,7 +130,7 @@ jobs:
         fi
         
         for mk in $SING_MAKEFILES; do
-            echo "-> 正在手术切除 $mk 中的巨型组件条件并移除 tailscale 源码"
+            echo "-> 正在手术切除 $mk 中的巨型组件条件并设置 tailscale 删除钩子"
             
             # 1. 删除所有 $(if $(CONFIG_...with_gvisor)...) 条件片段
             sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_GVISOR),with_gvisor)//g' "$mk"
@@ -141,12 +141,17 @@ jobs:
             # 2. 注释掉包含禁用标签关键词的整行（防止硬编码）
             sed -i '/with_gvisor\|with_quic\|with_v2ray_api\|with_wireguard/s/^/#/' "$mk"
             
-            # 3. 在 Build/Compile 中强行删除 tailscale 源码目录（根除编译错误）
-            sed -i '/$(call Build\/Compile\/Default)/i\trm -rf $$(PKG_BUILD_DIR)/protocol/tailscale' "$mk"
+            # 3. 追加 Build/PostPrepare 钩子，在编译前删除 tailscale 源码（根治编译错误）
+            cat >> "$mk" <<'EOF'
+        
+        define Build/PostPrepare
+        	rm -rf $(PKG_BUILD_DIR)/protocol/tailscale
+        endef
+        EOF
             
             # 4. 在文件末尾强制追加最终极简标签（override 确保覆盖所有定义）
             echo "override GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks" >> "$mk"
-            echo "✅ 手术成功，已注入 override 标签，并插入 tailscale 删除命令"
+            echo "✅ 手术成功，已注入 override 标签并设置 tailscale 删除钩子"
         done
         
         # 最终验证：检查非注释行中是否还有禁用标签
