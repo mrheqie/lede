@@ -115,7 +115,7 @@ jobs:
         echo "# CONFIG_PACKAGE_luci-mod-status is not set" >> .config
         echo "# CONFIG_PACKAGE_collectd is not set" >> .config
         
-        # 6. 魔改 Sing-box Makefile (★ 精准切除条件片段 + 强制注入)
+        # 6. 魔改 Sing-box Makefile (★ 精准切除 + 强制删除 tailscale)
         echo "=== 正在执行 Sing-box 条件片段精准切除 ==="
         
         if [ -f "package/homeproxy/files/usr/bin/sing-box" ] || [ -f "package/homeproxy/root/usr/bin/sing-box" ]; then
@@ -130,20 +130,23 @@ jobs:
         fi
         
         for mk in $SING_MAKEFILES; do
-            echo "-> 正在手术切除 $mk 中的巨型组件条件"
+            echo "-> 正在手术切除 $mk 中的巨型组件条件并移除 tailscale 源码"
             
-            # 1. 直接删除所有 $(if $(CONFIG_...with_gvisor)...) 这样的条件片段（不管嵌套）
+            # 1. 删除所有 $(if $(CONFIG_...with_gvisor)...) 条件片段
             sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_GVISOR),with_gvisor)//g' "$mk"
             sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_QUIC),with_quic)//g' "$mk"
             sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_V2RAY_API),with_v2ray_api)//g' "$mk"
             sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_WIREGUARD),with_wireguard)//g' "$mk"
             
-            # 2. 注释掉包含这些关键词的整行（防止还有硬编码的 with_gvisor 等独立标签）
+            # 2. 注释掉包含禁用标签关键词的整行（防止硬编码）
             sed -i '/with_gvisor\|with_quic\|with_v2ray_api\|with_wireguard/s/^/#/' "$mk"
             
-            # 3. 在文件末尾强制追加最终极简标签（Make 后定义的变量会覆盖前面）
+            # 3. 在 Build/Compile 中强行删除 tailscale 源码目录（根除编译错误）
+            sed -i '/$(call Build\/Compile\/Default)/i\trm -rf $$(PKG_BUILD_DIR)/protocol/tailscale' "$mk"
+            
+            # 4. 在文件末尾强制追加最终极简标签（override 确保覆盖所有定义）
             echo "override GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks" >> "$mk"
-            echo "✅ 手术成功，已注入 override 标签"
+            echo "✅ 手术成功，已注入 override 标签，并插入 tailscale 删除命令"
         done
         
         # 最终验证：检查非注释行中是否还有禁用标签
