@@ -115,7 +115,7 @@ jobs:
         echo "# CONFIG_PACKAGE_luci-mod-status is not set" >> .config
         echo "# CONFIG_PACKAGE_collectd is not set" >> .config
         
-        # 6. 魔改 Sing-box Makefile (★ 精准切除 + 强制覆盖 Build/Compile 删除 tailscale)
+        # 6. 魔改 Sing-box Makefile (★ 标签净化 + PostExtract 强制删除 tailscale)
         echo "=== 正在执行 Sing-box 净化与 tailscale 物理切除 ==="
         
         if [ -f "package/homeproxy/files/usr/bin/sing-box" ] || [ -f "package/homeproxy/root/usr/bin/sing-box" ]; then
@@ -130,7 +130,7 @@ jobs:
         fi
         
         for mk in $SING_MAKEFILES; do
-            echo "-> 正在手术切除 $mk 中的巨型组件并植入 tailscale 删除逻辑"
+            echo "-> 正在手术切除 $mk 中的巨型组件并植入 PostExtract 删除逻辑"
         
             # 1. 删除 $(if $(CONFIG_...)...) 条件片段
             sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_GVISOR),with_gvisor)//g' "$mk"
@@ -141,25 +141,24 @@ jobs:
             # 2. 注释掉含禁用标签的硬编码行
             sed -i '/with_gvisor\|with_quic\|with_v2ray_api\|with_wireguard/s/^/#/' "$mk"
         
-            # 3. 追加 override 标签（保证只编译所需协议）
+            # 3. 追加 override 标签
             echo "override GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks" >> "$mk"
         
-            # 4. 【关键】覆盖 Build/Compile，在编译前强制删除 tailscale 目录
-            # 先检查是否已有 Build/Compile 定义
-            if grep -q '^define Build/Compile' "$mk"; then
-                # 若已存在，在定义的第一行后插入 rm 命令
-                sed -i '/^define Build\/Compile/a\	rm -rf $(PKG_BUILD_DIR)/protocol/tailscale' "$mk"
-            else
-                # 否则追加完整的 Build/Compile 定义
+            # 4. 【终极根治】追加 Build/PostExtract 钩子，在解压后立即删除 tailscale 目录
+            #    无论源码解压多少次，这个钩子都会被调用，确保目录不存在
+            if ! grep -q '^define Build/PostExtract' "$mk"; then
                 cat >> "$mk" <<'EOF'
-        define Build/Compile
+        
+        define Build/PostExtract
         	rm -rf $(PKG_BUILD_DIR)/protocol/tailscale
-        	$(call Build/Compile/Default)
         endef
         EOF
+            else
+                # 如果已有 PostExtract，则在其中插入删除命令（防止重复定义）
+                sed -i '/^define Build\/PostExtract/a\	rm -rf $(PKG_BUILD_DIR)/protocol/tailscale' "$mk"
             fi
         
-            echo "✅ 手术成功，已注入 tailscale 删除命令"
+            echo "✅ 手术成功，已注入 PostExtract 删除钩子"
         done
         
         # 验证非注释行无残留巨型标签
