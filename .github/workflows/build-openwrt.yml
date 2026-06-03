@@ -89,6 +89,8 @@ jobs:
         echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-acm=y" >> .config                   # 关键：AT/QMI 控制端口
+        echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y" >> .config         # 备用：ECM 模式
         echo "CONFIG_PACKAGE_kmod-usb-serial=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-serial-wwan=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
