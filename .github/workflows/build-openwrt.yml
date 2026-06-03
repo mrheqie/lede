@@ -96,7 +96,7 @@ jobs:
         echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
         echo "CONFIG_PACKAGE_luci-proto-qmi=y" >> .config
         echo "CONFIG_PACKAGE_comgt=y" >> .config
-        # ★ 优化建议吸收：剔除不需要的网卡模拟驱动和 node 工具
+        echo "CONFIG_PACKAGE_uqmi=y" >> .config                # ← 必须加上的拨号程序
         echo "# CONFIG_PACKAGE_kmod-usb-net-cdc-ether is not set" >> .config
         echo "# CONFIG_PACKAGE_kmod-usb-net-rndis is not set" >> .config
         echo "# CONFIG_PACKAGE_kmod-usb-net-cdc-ncm is not set" >> .config
