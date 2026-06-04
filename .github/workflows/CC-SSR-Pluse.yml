@@ -1,0 +1,137 @@
+name: Build Kunpeng CC (MT7628 + EC200A) Dedicated Firmware
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+
+env:
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
+  TZ: Asia/Shanghai
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Initialization environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        # 1. 尽可能多地压榨并清理磁盘空间
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell /usr/share/swift /var/lib/apt/lists/*
+        sudo rm -rf /usr/local/share/boost /opt/az /usr/share/game /usr/local/lib/node_modules
+        
+        # 2. 更新源并强制使用无推荐依赖模式安装编译工具链
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install -y --no-install-recommends ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake xxd cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo u-boot-tools upx-ucl unzip xmlto xz-utils zlib1g-dev
+        
+        # 3. 清理收尾
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$USER /workdir
+
+    - name: Clone source code
+      working-directory: /workdir
+      run: |
+        git clone $REPO_URL -b $REPO_BRANCH lede
+        ln -sf /workdir/lede $GITHUB_WORKSPACE/lede
+
+    - name: Update & Install feeds
+      run: |
+        cd lede
+        # 1. 正常更新大雕官方基础源
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+        
+        # 2. 【终极修复】甩开 feeds 系统，直接把 fw876 的纯正 SSR-Plus 源码硬塞进本地 package 目录！
+        # 这样做完全绕过索引检查，彻底终结 "No such file" 报错。
+        git clone --depth=1 https://github.com/fw876/helloworld.git package/helloworld
+
+    - name: Generate Custom Configuration (.config)
+      run: |
+        cd lede
+        
+        # 1. 强行锁定核心架构与机型定义
+        echo "CONFIG_TARGET_ramips=y" > .config
+        echo "CONFIG_TARGET_ramips_mt76x8=y" >> .config
+        echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_nradio_wt6285=y" >> .config
+        
+        # 2. 注入基础网页与简中语言包
+        echo "CONFIG_PACKAGE_luci=y" >> .config
+        echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
+        echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
+        
+        # 3. 【强行焊死】SSR-Plus 核心网页组件及必备客户端
+        echo "CONFIG_PACKAGE_luci-app-ssr-plus=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_ShadowsocksR_Libev_Client=y" >> .config
+        
+        # 【精准降温】只关闭 SSR-Plus 内部的巨无霸 Xray 和 V2ray 内核（这就是省空间的关键）
+        # 这样它就会退而求其次，自动去编译只有几百 KB 的 C 语言轻量 SS/SSR 内核
+        echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_V2ray=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Xray=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Socks5_Proxy=n" >> .config
+        echo "CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_Moira=n" >> .config
+        
+        # 4. 【强行焊死】移远 EC200A 4G 模组底层驱动 + 4G 网页拨号控制面板
+        echo "CONFIG_PACKAGE_kmod-usb-core=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-rndis=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ncm=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-serial=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-serial-wwan=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
+        echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
+        # 补齐 4G 网页拨号协议组件，没有这些你在后台找不到“3G/4G 拨号”协议
+        echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
+        echo "CONFIG_PACKAGE_luci-proto-qmi=y" >> .config
+        echo "CONFIG_PACKAGE_comgt=y" >> .config
+        echo "CONFIG_PACKAGE_usb-modem-node=y" >> .config
+        
+        # 5. 【极限减肥】强行反选/剔除大雕源码默认捆绑的无用“全家桶”插件与重型依赖
+        # 这些组件对于 MT7628 这类小闪存/小内存设备是极大负担，4G 环境下完全不需要
+        echo "CONFIG_PACKAGE_luci-app-vlmcsd=n" >> .config       # 剔除 KMS 激活网页
+        echo "CONFIG_PACKAGE_luci-app-vsftpd=n" >> .config       # 剔除 FTP 服务器网页
+        echo "CONFIG_PACKAGE_luci-app-wol=n" >> .config          # 剔除 网络唤醒
+        echo "CONFIG_PACKAGE_luci-app-arpbind=n" >> .config      # 剔除 IP/MAC 绑定
+        echo "CONFIG_PACKAGE_luci-app-nlbwmon=n" >> .config      # 剔除 流量统计 (后台常驻极其吃内存)
+        echo "CONFIG_PACKAGE_luci-app-access-control=n" >> .config # 剔除 访问控制
+        echo "CONFIG_PACKAGE_luci-app-ddns=n" >> .config         # 剔除 动态域名
+        echo "CONFIG_PACKAGE_nmap=n" >> .config                  # 剔除 极其臃肿的 nmap 网络扫描工具
+        echo "CONFIG_PACKAGE_vsftpd-alt=n" >> .config            # 剔除 FTP 底层依赖
+        echo "CONFIG_PACKAGE_vlmcsd=n" >> .config                # 剔除 KMS 底层依赖
+        
+        # 6. 让系统自动补全其余依赖，但绝不反选上面我们强行塞进去的驱动
+        make defconfig
+
+    - name: Download package
+      id: package
+      run: |
+        cd lede
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: Compile the firmware
+      id: compile
+      run: |
+        cd lede
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: Upload firmware to Artifacts
+      uses: actions/upload-artifact@v4
+      if: steps.compile.outputs.status == 'success'
+      with:
+        name: OpenWrt_KunpengCC_EC200A_Firmware
+        path: lede/bin/targets/ramips/mt76x8/*.bin
