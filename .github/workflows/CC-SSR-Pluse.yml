@@ -1,4 +1,4 @@
-name: Build Kunpeng CC (MT7628 + EC200A) Dedicated Firmware
+name: Build Kunpeng CC (MT7628 + EC200A) SSR-Pluse Firmware
 
 on:
   repository_dispatch:
