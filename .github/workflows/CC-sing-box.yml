@@ -63,20 +63,13 @@ jobs:
         echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
         echo "CONFIG_PACKAGE_luci-compat=y" >> .config
         
-        # 3. 【代理核心】启用 Homeproxy 与 Sing-box (极致体积与 UPX 优化)
+        # 3. 【代理核心】启用 Homeproxy 与 Sing-box (极致体积优化)
         echo "CONFIG_PACKAGE_luci-app-homeproxy=y" >> .config
         echo "CONFIG_PACKAGE_sing-box=y" >> .config
-        echo "CONFIG_SING_BOX_UPX=y" >> .config
-        echo "CONFIG_PACKAGE_sing-box_INCLUDE_UPX=y" >> .config
         echo "CONFIG_PACKAGE_curl=y" >> .config
         echo "CONFIG_PACKAGE_ca-bundle=y" >> .config
         echo "CONFIG_TARGET_OPTIONS=y" >> .config
         echo "CONFIG_TARGET_OPTIMIZATION=\"-Os -pipe -mno-branch-likely -mips32r2 -mtune=24kc\"" >> .config
-        
-        # 彻底切断旧时代协议依赖
-        echo "# CONFIG_PACKAGE_luci-app-ssr-plus is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-passwall is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-openclash is not set" >> .config
         
         # 4. 【4G 驱动与核心工具】保留 QMI
         echo "CONFIG_PACKAGE_kmod-usb-core=y" >> .config
@@ -92,54 +85,47 @@ jobs:
         echo "CONFIG_PACKAGE_comgt=y" >> .config
         echo "CONFIG_PACKAGE_uqmi=y" >> .config
         
-        # 砍掉网卡模拟冗余
+        # 5. 【终极杀后台】切除一切隐形巨无霸，保卫 16MB 阵地
+        echo "# CONFIG_PACKAGE_luci-app-ssr-plus is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-passwall is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-openclash is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-samba4 is not set" >> .config
+        echo "# CONFIG_PACKAGE_samba4-libs is not set" >> .config
+        echo "# CONFIG_PACKAGE_samba4-server is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-unblockmusic is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-adbyby-plus is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-filetransfer is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-qos is not set" >> .config
         echo "# CONFIG_PACKAGE_kmod-usb-net-cdc-ether is not set" >> .config
         echo "# CONFIG_PACKAGE_kmod-usb-net-rndis is not set" >> .config
         echo "# CONFIG_PACKAGE_kmod-usb-net-cdc-ncm is not set" >> .config
         echo "# CONFIG_PACKAGE_usb-modem-node is not set" >> .config
         
-        # 5. 【极限杀后台】
-        echo "# CONFIG_PACKAGE_nlbwmon is not set" >> .config
-        echo "# CONFIG_PACKAGE_tethering is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-vlmcsd is not set" >> .config
-        echo "# CONFIG_PACKAGE_vlmcsd is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-vsftpd is not set" >> .config
-        echo "# CONFIG_PACKAGE_vsftpd-alt is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-wol is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-upnp is not set" >> .config
-        echo "# CONFIG_PACKAGE_miniupnpd is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-ddns is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-arpbind is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-accesscontrol is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-rclone is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-uugamebooster is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-xlnetacc is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-sqm is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-mod-status is not set" >> .config
-        echo "# CONFIG_PACKAGE_collectd is not set" >> .config
-        
-        # 6. 【魔改压榨】通过擦除 Makefile 标签彻底干掉 Tailscale/Gvisor + 注入宿主机 UPX 强压
+        # 6. 【魔改压榨】剔除巨无霸协议，锁定极简组合
         echo "=== 正在魔改 Sing-box 编译配置以适配 16M Flash ==="
-        
         SING_BOX_MAKEFILE=$(find ./feeds/ -path "*/sing-box/Makefile" | head -n 1)
         
         if [ -n "$SING_BOX_MAKEFILE" ]; then
             echo "-> 找到 Makefile 目标: $SING_BOX_MAKEFILE"
             
-            # 💡 核心修复：直接抹除可能引发编译失败及体积超限的编译标签
+            # 清理所有复杂协议和内存黑洞
             sed -i 's/with_tailscale//g' "$SING_BOX_MAKEFILE"
             sed -i 's/with_gvisor//g' "$SING_BOX_MAKEFILE"
             sed -i 's/with_wireguard//g' "$SING_BOX_MAKEFILE"
+            sed -i 's/with_quic//g' "$SING_BOX_MAKEFILE"
+            sed -i 's/with_v2ray_api//g' "$SING_BOX_MAKEFILE"
+            sed -i 's/with_clash_api//g' "$SING_BOX_MAKEFILE"
             
-            # 双重保险：在 .config 依赖中同样宣告关闭
+            # 双重保险：在 .config 宣告关闭
             echo "# CONFIG_SING_BOX_BUILD_GVISOR is not set" >> .config
             echo "# CONFIG_SING_BOX_BUILD_TAILSCALE is not set" >> .config
             echo "# CONFIG_SING_BOX_BUILD_WIREGUARD is not set" >> .config
+            echo "# CONFIG_SING_BOX_BUILD_QUIC is not set" >> .config
             
-            # 精准微调 UPX：在安装动作结束前，调用 Ubuntu 宿主机全局 upx 工具进行 --lzma 极限压缩
-            sed -i '/define Package\/sing-box\/install/,/endef/ s/endef/\t-upx --lzma --best \$(1)\/usr\/bin\/sing-box\nendef/' "$SING_BOX_MAKEFILE"
+            # 极简核心：只留 utls, anytls, shadowsocks
+            echo "override GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks" >> "$SING_BOX_MAKEFILE"
             
-            echo "✅ Makefile 标签擦除与 UPX 强压注入成功。"
+            echo "✅ Makefile 极简标签注入成功，已移除手动 UPX 逻辑交由 SquashFS 处理。"
         else
             echo "❌ 未找到 sing-box Makefile，请检查 feeds 是否安装成功。"
             exit 1
@@ -163,20 +149,29 @@ jobs:
         make -j$(nproc) || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
 
-    # 安全探针：体积超限直接熔断
+    # 安全探针与详情汇报
     - name: Check Firmware Size (Safety Guard)
       if: steps.compile.outputs.status == 'success'
       run: |
         cd lede/bin/targets/ramips/mt76x8/
-        echo "=== 固件体积报告 ==="
-        ls -lh *sysupgrade*.bin
+        echo "=== 编译产物列表 (如果缺少 sysupgrade.bin，说明固件依然超限) ==="
+        ls -lh
+        echo "====================================================="
+        
+        if ! ls *sysupgrade*.bin 1> /dev/null 2>&1; then
+          echo "❌ 致命错误：未找到 sysupgrade 刷机包！"
+          echo "原因：核心组件 (vmlinux + root.squashfs) 的总大小超过了 16MB 硬件分区上限。"
+          echo "OpenWrt 保护机制触发，已拒绝打包。"
+          exit 1
+        fi
+        
         FILE=$(ls *sysupgrade*.bin | head -n 1)
         SIZE=$(stat -c%s "$FILE")
         if [ "$SIZE" -gt 16000000 ]; then
-          echo "❌ 致命错误：固件体积高达 $SIZE 字节，超过 16MB 物理限制，强行刷入会导致路由器变砖！"
+          echo "❌ 严重警告：固件体积 ($SIZE 字节) 虽然生成，但仍超过 16MB 理论值，强刷可能变砖！"
           exit 1
         else
-          echo "✅ 固件体积安全 ($SIZE 字节)，可以放心刷入！"
+          echo "✅ 恭喜！固件体积安全 ($SIZE 字节)，已成功塞入 16MB 空间！"
         fi
 
     - name: Upload firmware to Artifacts
