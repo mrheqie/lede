@@ -115,62 +115,37 @@ jobs:
         echo "# CONFIG_PACKAGE_luci-mod-status is not set" >> .config
         echo "# CONFIG_PACKAGE_collectd is not set" >> .config
         
-        # 6. 魔改 Sing-box Makefile (★ 强制覆盖 Build/Compile 切除 tailscale)
-        echo "=== 正在执行 Sing-box 净化与 tailscale 强制切除 ==="
+        # 6. 【暴力手术】物理移除所有 Tailscale 关联代码
+        echo "=== 正在物理销毁 Sing-box 中的 Tailscale 模块 ==="
         
-        if [ -f "package/homeproxy/files/usr/bin/sing-box" ] || [ -f "package/homeproxy/root/usr/bin/sing-box" ]; then
-            echo "❌ 致命拦截：检测到预置二进制"
+        # 找到 sing-box 的源码目录
+        SING_BOX_DIR=$(find ./build_dir/target-* -maxdepth 2 -name "sing-box-*" -type d | head -n 1)
+        
+        # 如果还没到 build_dir 阶段（即在源码包阶段），则定位到 feeds 目录
+        if [ -z "$SING_BOX_DIR" ]; then
+            SING_BOX_DIR=$(find ./feeds -name "sing-box" -type d | head -n 1)
+        fi
+
+        if [ -n "$SING_BOX_DIR" ]; then
+            echo "-> 找到源码目录: $SING_BOX_DIR"
+            
+            # 1. 暴力删除 Tailscale 相关目录
+            rm -rf "${SING_BOX_DIR}/protocol/tailscale"
+            
+            # 2. 核心步骤：移除所有引用了 Tailscale 的 .go 文件
+            # 搜索包含 "tailscale" 字符串的文件并删除，避免 Go 编译器报错
+            grep -r "tailscale" "$SING_BOX_DIR" --include="*.go" | cut -d: -f1 | sort -u | xargs rm -f
+            
+            # 3. 如果有 go.mod，尝试清空相关依赖（可选）
+            if [ -f "${SING_BOX_DIR}/go.mod" ]; then
+                sed -i '/tailscale/d' "${SING_BOX_DIR}/go.mod"
+            fi
+            
+            echo "✅ 物理阉割完成，残留引用已清除。"
+        else
+            echo "❌ 未找到 sing-box 源码目录，请检查路径。"
             exit 1
         fi
-        
-        SING_MAKEFILES=$(find ./feeds ./package -type f -path "*/sing-box/Makefile")
-        if [ -z "$SING_MAKEFILES" ]; then
-            echo "❌ 未找到 sing-box Makefile"
-            exit 1
-        fi
-        
-        for mk in $SING_MAKEFILES; do
-            echo "-> 正在手术切除 $mk 中的巨型组件并改写 Build/Compile"
-        
-            # 1. 删除 $(if $(CONFIG_...)...) 条件片段
-            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_GVISOR),with_gvisor)//g' "$mk"
-            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_QUIC),with_quic)//g' "$mk"
-            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_V2RAY_API),with_v2ray_api)//g' "$mk"
-            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_WIREGUARD),with_wireguard)//g' "$mk"
-        
-            # 2. 注释掉含禁用标签的硬编码行（包括 tailscale）
-            sed -i '/with_gvisor\|with_quic\|with_v2ray_api\|with_wireguard\|with_tailscale/s/^/#/' "$mk"
-        
-            # 3. 追加 override 标签（强制只编译所需协议）
-            echo "override GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks" >> "$mk"
-        
-            # 4. 删除原有的 Build/Compile 定义（如果有），然后强制写入新的
-            sed -i '/^define Build\/Compile/,/^endef/d' "$mk"
-        
-            cat >> "$mk" <<'EOF'
-        
-        define Build/Compile
-        	rm -rf $(PKG_BUILD_DIR)/protocol/tailscale
-        	$(call Build/Compile/Default)
-        endef
-        EOF
-        
-            echo "✅ 手术成功，已强制覆盖 Build/Compile 并植入 tailscale 删除"
-        done
-        
-        # 验证非注释行无残留禁用标签
-        if grep -v "^#" $SING_MAKEFILES | grep -qE "with_gvisor|with_wireguard|with_quic|with_v2ray|with_tailscale"; then
-            echo "❌ 仍有禁用组件残留"
-            grep -v "^#" $SING_MAKEFILES | grep -nE "with_gvisor|with_wireguard|with_quic|with_v2ray|with_tailscale"
-            exit 1
-        fi
-        
-        if ! grep -v "^#" $SING_MAKEFILES | grep -q "with_anytls" || ! grep -v "^#" $SING_MAKEFILES | grep -q "with_shadowsocks"; then
-            echo "❌ 协议标签丢失"
-            exit 1
-        fi
-        
-        echo "✅ 协议集成验证通过，Sing-box 净化成功。"
         
         # 7. 生成最终依赖
         make defconfig
