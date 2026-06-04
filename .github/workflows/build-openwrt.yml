@@ -84,18 +84,23 @@ jobs:
         echo "CONFIG_PACKAGE_ca-bundle=y" >> .config
         echo "# CONFIG_PACKAGE_ca-certificates is not set" >> .config
         
-        # 4. 【移远 EC200A 核心驱动精简版】保留 QMI 模式，砍掉多余冗余驱动
+        # 4. 【强行焊死】移远 EC200A 4G 模组底层驱动 + 4G 网页拨号控制面板
         echo "CONFIG_PACKAGE_kmod-usb-core=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-acm=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-rndis=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ncm=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-serial=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-serial-wwan=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-serial-option=y" >> .config
         echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
-        echo "CONFIG_PACKAGE_uqmi=y" >> .config
+        # 补齐 4G 网页拨号协议组件，没有这些你在后台找不到“3G/4G 拨号”协议
+        echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
+        echo "CONFIG_PACKAGE_luci-proto-qmi=y" >> .config
+        echo "CONFIG_PACKAGE_comgt=y" >> .config
+        echo "CONFIG_PACKAGE_usb-modem-node=y" >> .config
         
         # 5. 安全精简：剔除冗余插件
         echo "# CONFIG_PACKAGE_luci-app-vlmcsd is not set" >> .config
