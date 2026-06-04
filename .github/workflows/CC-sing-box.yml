@@ -63,12 +63,13 @@ jobs:
         echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
         echo "CONFIG_PACKAGE_luci-compat=y" >> .config
         
-        # 3. 【代理核心】启用 Homeproxy 与 Sing-box
+        # 3. 【代理核心】启用 Homeproxy 与 Sing-box (极致体积优化)
         echo "CONFIG_PACKAGE_luci-app-homeproxy=y" >> .config
         echo "CONFIG_PACKAGE_sing-box=y" >> .config
-        echo "CONFIG_PACKAGE_upx=y" >> .config
         echo "CONFIG_PACKAGE_curl=y" >> .config
         echo "CONFIG_PACKAGE_ca-bundle=y" >> .config
+        echo "CONFIG_TARGET_OPTIONS=y" >> .config
+        echo "CONFIG_TARGET_OPTIMIZATION=\"-Os -pipe -mno-branch-likely -mips32r2 -mtune=24kc\"" >> .config
         
         # 彻底切断旧时代协议依赖
         echo "# CONFIG_PACKAGE_luci-app-ssr-plus is not set" >> .config
@@ -115,39 +116,19 @@ jobs:
         echo "# CONFIG_PACKAGE_luci-mod-status is not set" >> .config
         echo "# CONFIG_PACKAGE_collectd is not set" >> .config
         
-        # 6. 【暴力手术】物理移除所有 Tailscale 关联代码
-        echo "=== 正在物理销毁 Sing-box 中的 Tailscale 模块 ==="
+        # 6. 魔改 Sing-box Makefile (清洗打包编译标签)
+        SING_MAKEFILES=$(find ./feeds ./package -type f -path "*/sing-box/Makefile")
+        for mk in $SING_MAKEFILES; do
+            echo "-> 正在优化 $mk 中的标签定义"
+            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_GVISOR),with_gvisor)//g' "$mk"
+            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_QUIC),with_quic)//g' "$mk"
+            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_V2RAY_API),with_v2ray_api)//g' "$mk"
+            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_WIREGUARD),with_wireguard)//g' "$mk"
+            sed -i '/with_gvisor\|with_quic\|with_v2ray_api\|with_wireguard\|with_tailscale/s/^/#/' "$mk"
+            echo "override GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks" >> "$mk"
+        done
         
-        # 找到 sing-box 的源码目录
-        SING_BOX_DIR=$(find ./build_dir/target-* -maxdepth 2 -name "sing-box-*" -type d | head -n 1)
-        
-        # 如果还没到 build_dir 阶段（即在源码包阶段），则定位到 feeds 目录
-        if [ -z "$SING_BOX_DIR" ]; then
-            SING_BOX_DIR=$(find ./feeds -name "sing-box" -type d | head -n 1)
-        fi
-
-        if [ -n "$SING_BOX_DIR" ]; then
-            echo "-> 找到源码目录: $SING_BOX_DIR"
-            
-            # 1. 暴力删除 Tailscale 相关目录
-            rm -rf "${SING_BOX_DIR}/protocol/tailscale"
-            
-            # 2. 核心步骤：移除所有引用了 Tailscale 的 .go 文件
-            # 搜索包含 "tailscale" 字符串的文件并删除，避免 Go 编译器报错
-            grep -r "tailscale" "$SING_BOX_DIR" --include="*.go" | cut -d: -f1 | sort -u | xargs rm -f
-            
-            # 3. 如果有 go.mod，尝试清空相关依赖（可选）
-            if [ -f "${SING_BOX_DIR}/go.mod" ]; then
-                sed -i '/tailscale/d' "${SING_BOX_DIR}/go.mod"
-            fi
-            
-            echo "✅ 物理阉割完成，残留引用已清除。"
-        else
-            echo "❌ 未找到 sing-box 源码目录，请检查路径。"
-            exit 1
-        fi
-        
-        # 7. 生成最终依赖
+        # 7. 生成最终全局依赖
         make defconfig
 
     - name: Download package
@@ -157,6 +138,32 @@ jobs:
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
+
+    - name: Sing-box Tailscale Clean Surgery (高级物理净化)
+      run: |
+        cd lede
+        echo "=== 正在解压并实施针对 Tailscale 的空包桩手术 ==="
+        
+        # 1. 强制编译系统提前将 sing-box 源码包释放到 build_dir 目录中
+        make package/feeds/packages/sing-box/prepare V=s
+        
+        # 2. 动态精准定位解压出来的源码绝对路径
+        SING_BOX_DIR=$(find ./build_dir/target-* -maxdepth 2 -name "sing-box-*" -type d | head -n 1)
+        
+        if [ -n "$SING_BOX_DIR" ]; then
+            echo "-> 成功锁定 sing-box 源码树位置: $SING_BOX_DIR"
+            
+            # 3. 清空整个 tailscale 子包目录下的所有高级 Go 代码
+            rm -rf "${SING_BOX_DIR}/protocol/tailscale"/*
+            
+            # 4. 精准植入空桩声明。让外部 import 引用的地方不崩，同时体积归零
+            echo "package tailscale" > "${SING_BOX_DIR}/protocol/tailscale/dummy.go"
+            
+            echo "✅ 手术成功！已注入空包桩，彻底规避 undefined: tun.DefaultNIC 编译熔断！"
+        else
+            echo "❌ 严重错误：未能在 build_dir 下捕获到解压后的 sing-box 文件夹！"
+            exit 1
+        fi
 
     - name: Compile the firmware
       id: compile
