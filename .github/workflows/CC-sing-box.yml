@@ -118,7 +118,7 @@ jobs:
         echo "# CONFIG_PACKAGE_luci-mod-status is not set" >> .config
         echo "# CONFIG_PACKAGE_collectd is not set" >> .config
         
-        # 6. 【魔改 Makefile】精简协议编译标签 + 注入宿主机 UPX 强压
+        # 6. 【魔改压榨】通过擦除 Makefile 标签彻底干掉 Tailscale/Gvisor + 注入宿主机 UPX 强压
         echo "=== 正在魔改 Sing-box 编译配置以适配 16M Flash ==="
         
         SING_BOX_MAKEFILE=$(find ./feeds/ -path "*/sing-box/Makefile" | head -n 1)
@@ -126,17 +126,20 @@ jobs:
         if [ -n "$SING_BOX_MAKEFILE" ]; then
             echo "-> 找到 Makefile 目标: $SING_BOX_MAKEFILE"
             
-            # 移除不必要的大体积组件标签，防止 MIPS 架构内存溢出
-            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_GVISOR),with_gvisor)//g' "$SING_BOX_MAKEFILE"
-            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_WIREGUARD),with_wireguard)//g' "$SING_BOX_MAKEFILE"
+            # 💡 核心修复：直接抹除可能引发编译失败及体积超限的编译标签
+            sed -i 's/with_tailscale//g' "$SING_BOX_MAKEFILE"
+            sed -i 's/with_gvisor//g' "$SING_BOX_MAKEFILE"
+            sed -i 's/with_wireguard//g' "$SING_BOX_MAKEFILE"
             
-            # 重写编译标签组合：不声明 with_tailscale，编译器在编译时就会自动将其无痕剔除！
-            echo "override GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks,with_trojan,with_vless,with_vmess,with_clash_api" >> "$SING_BOX_MAKEFILE"
+            # 双重保险：在 .config 依赖中同样宣告关闭
+            echo "# CONFIG_SING_BOX_BUILD_GVISOR is not set" >> .config
+            echo "# CONFIG_SING_BOX_BUILD_TAILSCALE is not set" >> .config
+            echo "# CONFIG_SING_BOX_BUILD_WIREGUARD is not set" >> .config
             
             # 精准微调 UPX：在安装动作结束前，调用 Ubuntu 宿主机全局 upx 工具进行 --lzma 极限压缩
             sed -i '/define Package\/sing-box\/install/,/endef/ s/endef/\t-upx --lzma --best \$(1)\/usr\/bin\/sing-box\nendef/' "$SING_BOX_MAKEFILE"
             
-            echo "✅ Makefile 精简与 UPX 强压注入成功。"
+            echo "✅ Makefile 标签擦除与 UPX 强压注入成功。"
         else
             echo "❌ 未找到 sing-box Makefile，请检查 feeds 是否安装成功。"
             exit 1
