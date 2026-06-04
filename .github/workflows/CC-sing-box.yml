@@ -63,9 +63,11 @@ jobs:
         echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
         echo "CONFIG_PACKAGE_luci-compat=y" >> .config
         
-        # 3. 【代理核心】启用 Homeproxy 与 Sing-box (极致体积优化)
+        # 3. 【代理核心】启用 Homeproxy 与 Sing-box (极致体积与 UPX 优化)
         echo "CONFIG_PACKAGE_luci-app-homeproxy=y" >> .config
         echo "CONFIG_PACKAGE_sing-box=y" >> .config
+        echo "CONFIG_SING_BOX_UPX=y" >> .config
+        echo "CONFIG_PACKAGE_sing-box_INCLUDE_UPX=y" >> .config
         echo "CONFIG_PACKAGE_curl=y" >> .config
         echo "CONFIG_PACKAGE_ca-bundle=y" >> .config
         echo "CONFIG_TARGET_OPTIONS=y" >> .config
@@ -116,19 +118,31 @@ jobs:
         echo "# CONFIG_PACKAGE_luci-mod-status is not set" >> .config
         echo "# CONFIG_PACKAGE_collectd is not set" >> .config
         
-        # 6. 魔改 Sing-box Makefile (清洗打包编译标签)
-        SING_MAKEFILES=$(find ./feeds ./package -type f -path "*/sing-box/Makefile")
-        for mk in $SING_MAKEFILES; do
-            echo "-> 正在优化 $mk 中的标签定义"
-            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_GVISOR),with_gvisor)//g' "$mk"
-            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_QUIC),with_quic)//g' "$mk"
-            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_V2RAY_API),with_v2ray_api)//g' "$mk"
-            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_WIREGUARD),with_wireguard)//g' "$mk"
-            sed -i '/with_gvisor\|with_quic\|with_v2ray_api\|with_wireguard\|with_tailscale/s/^/#/' "$mk"
-            echo "override GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks" >> "$mk"
-        done
+        # 6. 【魔改 Makefile】精简协议编译标签 + 注入宿主机 UPX 强压
+        echo "=== 正在魔改 Sing-box 编译配置以适配 16M Flash ==="
         
-        # 7. 生成最终全局依赖
+        SING_BOX_MAKEFILE=$(find ./feeds/ -path "*/sing-box/Makefile" | head -n 1)
+        
+        if [ -n "$SING_BOX_MAKEFILE" ]; then
+            echo "-> 找到 Makefile 目标: $SING_BOX_MAKEFILE"
+            
+            # 移除不必要的大体积组件标签，防止 MIPS 架构内存溢出
+            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_GVISOR),with_gvisor)//g' "$SING_BOX_MAKEFILE"
+            sed -i 's/\$(if \$(CONFIG_SING_BOX_BUILD_WIREGUARD),with_wireguard)//g' "$SING_BOX_MAKEFILE"
+            
+            # 重写编译标签组合：不声明 with_tailscale，编译器在编译时就会自动将其无痕剔除！
+            echo "override GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks,with_trojan,with_vless,with_vmess,with_clash_api" >> "$SING_BOX_MAKEFILE"
+            
+            # 精准微调 UPX：在安装动作结束前，调用 Ubuntu 宿主机全局 upx 工具进行 --lzma 极限压缩
+            sed -i '/define Package\/sing-box\/install/,/endef/ s/endef/\t-upx --lzma --best \$(1)\/usr\/bin\/sing-box\nendef/' "$SING_BOX_MAKEFILE"
+            
+            echo "✅ Makefile 精简与 UPX 强压注入成功。"
+        else
+            echo "❌ 未找到 sing-box Makefile，请检查 feeds 是否安装成功。"
+            exit 1
+        fi
+        
+        # 7. 生成最终依赖
         make defconfig
 
     - name: Download package
@@ -138,32 +152,6 @@ jobs:
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
-
-    - name: Sing-box Tailscale Clean Surgery (高级物理净化)
-      run: |
-        cd lede
-        echo "=== 正在解压并实施针对 Tailscale 的空包桩手术 ==="
-        
-        # 1. 强制编译系统提前将 sing-box 源码包释放到 build_dir 目录中
-        make package/feeds/packages/sing-box/prepare V=s
-        
-        # 2. 动态精准定位解压出来的源码绝对路径
-        SING_BOX_DIR=$(find ./build_dir/target-* -maxdepth 2 -name "sing-box-*" -type d | head -n 1)
-        
-        if [ -n "$SING_BOX_DIR" ]; then
-            echo "-> 成功锁定 sing-box 源码树位置: $SING_BOX_DIR"
-            
-            # 3. 清空整个 tailscale 子包目录下的所有高级 Go 代码
-            rm -rf "${SING_BOX_DIR}/protocol/tailscale"/*
-            
-            # 4. 精准植入空桩声明。让外部 import 引用的地方不崩，同时体积归零
-            echo "package tailscale" > "${SING_BOX_DIR}/protocol/tailscale/dummy.go"
-            
-            echo "✅ 手术成功！已注入空包桩，彻底规避 undefined: tun.DefaultNIC 编译熔断！"
-        else
-            echo "❌ 严重错误：未能在 build_dir 下捕获到解压后的 sing-box 文件夹！"
-            exit 1
-        fi
 
     - name: Compile the firmware
       id: compile
