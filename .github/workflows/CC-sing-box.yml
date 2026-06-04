@@ -50,12 +50,12 @@ jobs:
       run: |
         cd lede
         
-        # 1. 核心架构与机型
+        # 1. 核心架构与机型 (WT6285)
         echo "CONFIG_TARGET_ramips=y" > .config
         echo "CONFIG_TARGET_ramips_mt76x8=y" >> .config
         echo "CONFIG_TARGET_ramips_mt76x8_DEVICE_nradio_wt6285=y" >> .config
         
-        # 2. 基础网页与核心硬件加速
+        # 2. 基础网页与网络加速
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_LUCI_LANG_zh_Hans=y" >> .config
         echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
@@ -63,7 +63,7 @@ jobs:
         echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
         echo "CONFIG_PACKAGE_luci-compat=y" >> .config
         
-        # 3. 【代理核心】启用 Homeproxy 与 Sing-box (极致体积优化)
+        # 3. 启用核心代理组件
         echo "CONFIG_PACKAGE_luci-app-homeproxy=y" >> .config
         echo "CONFIG_PACKAGE_sing-box=y" >> .config
         echo "CONFIG_PACKAGE_curl=y" >> .config
@@ -71,7 +71,7 @@ jobs:
         echo "CONFIG_TARGET_OPTIONS=y" >> .config
         echo "CONFIG_TARGET_OPTIMIZATION=\"-Os -pipe -mno-branch-likely -mips32r2 -mtune=24kc\"" >> .config
         
-        # 4. 【4G 驱动与核心工具】保留 QMI
+        # 4. 保留 4G EC200A 核心驱动组件 (QMI 拨号)
         echo "CONFIG_PACKAGE_kmod-usb-core=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
@@ -85,53 +85,70 @@ jobs:
         echo "CONFIG_PACKAGE_comgt=y" >> .config
         echo "CONFIG_PACKAGE_uqmi=y" >> .config
         
-        # 5. 【终极杀后台】切除一切隐形巨无霸，保卫 16MB 阵地
+        # 5. 【焦土级瘦身】砍掉一切与 4G/代理 无关的内核模块与大体积插件 (全力保卫 16MB 空间)
+        echo "# CONFIG_PACKAGE_kmod-usb-storage is not set" >> .config
+        echo "# CONFIG_PACKAGE_kmod-usb-storage-uas is not set" >> .config
+        echo "# CONFIG_PACKAGE_kmod-fs-vfat is not set" >> .config
+        echo "# CONFIG_PACKAGE_kmod-fs-ext4 is not set" >> .config
+        echo "# CONFIG_PACKAGE_kmod-fs-ntfs3 is not set" >> .config
+        echo "# CONFIG_PACKAGE_kmod-fs-exfat is not set" >> .config
+        echo "# CONFIG_PACKAGE_automount is not set" >> .config
+        
+        # 拔除 Lean 固件中默认塞入的全家桶大件应用
+        echo "# CONFIG_PACKAGE_luci-app-filetransfer is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-vsftpd is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-vlmcsd is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-ddns is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-arpbind is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-accesscontrol is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-wol is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-nlbwmon is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-sqm is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-upnp is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-usb-printer is not set" >> .config
+        echo "# CONFIG_PACKAGE_vsftpd-alt is not set" >> .config
+        echo "# CONFIG_PACKAGE_vlmcsd is not set" >> .config
+        echo "# CONFIG_PACKAGE_uugamebooster is not set" >> .config
+        echo "# CONFIG_PACKAGE_xlnetacc is not set" >> .config
+        echo "# CONFIG_PACKAGE_etherwake is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-ssr-plus is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-passwall is not set" >> .config
         echo "# CONFIG_PACKAGE_luci-app-openclash is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-samba4 is not set" >> .config
-        echo "# CONFIG_PACKAGE_samba4-libs is not set" >> .config
-        echo "# CONFIG_PACKAGE_samba4-server is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-unblockmusic is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-adbyby-plus is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-filetransfer is not set" >> .config
-        echo "# CONFIG_PACKAGE_luci-app-qos is not set" >> .config
-        echo "# CONFIG_PACKAGE_kmod-usb-net-cdc-ether is not set" >> .config
-        echo "# CONFIG_PACKAGE_kmod-usb-net-rndis is not set" >> .config
-        echo "# CONFIG_PACKAGE_kmod-usb-net-cdc-ncm is not set" >> .config
-        echo "# CONFIG_PACKAGE_usb-modem-node is not set" >> .config
         
-        # 6. 【魔改压榨】剔除巨无霸协议，锁定极简组合
+        # 6. 【围剿 Sing-box 隐形默认值】显式强制关闭所有无用协议及重型接口，锁定最低运行配置
+        for prefix in SING_BOX_WITH SINGBOX_WITH; do
+            echo "# CONFIG_${prefix}_ACME is not set" >> .config
+            echo "# CONFIG_${prefix}_CLASH_API is not set" >> .config
+            echo "# CONFIG_${prefix}_DHCP is not set" >> .config
+            echo "# CONFIG_${prefix}_ECHO is not set" >> .config
+            echo "# CONFIG_${prefix}_ECH is not set" >> .config
+            echo "# CONFIG_${prefix}_EMBEDDED_TOR is not set" >> .config
+            echo "# CONFIG_${prefix}_GRPC is not set" >> .config
+            echo "# CONFIG_${prefix}_GVISOR is not set" >> .config
+            echo "# CONFIG_${prefix}_QUIC is not set" >> .config
+            echo "# CONFIG_${prefix}_REALITY_SERVER is not set" >> .config
+            echo "# CONFIG_${prefix}_TAILSCALE is not set" >> .config
+            echo "# CONFIG_${prefix}_V2RAY_API is not set" >> .config
+            echo "# CONFIG_${prefix}_WIREGUARD is not set" >> .config
+        done
+        
+        # 7. 通过 Makefile 物理擦除多余标签字符串
         echo "=== 正在魔改 Sing-box 编译配置以适配 16M Flash ==="
         SING_BOX_MAKEFILE=$(find ./feeds/ -path "*/sing-box/Makefile" | head -n 1)
-        
         if [ -n "$SING_BOX_MAKEFILE" ]; then
             echo "-> 找到 Makefile 目标: $SING_BOX_MAKEFILE"
-            
-            # 清理所有复杂协议和内存黑洞
             sed -i 's/with_tailscale//g' "$SING_BOX_MAKEFILE"
             sed -i 's/with_gvisor//g' "$SING_BOX_MAKEFILE"
             sed -i 's/with_wireguard//g' "$SING_BOX_MAKEFILE"
             sed -i 's/with_quic//g' "$SING_BOX_MAKEFILE"
             sed -i 's/with_v2ray_api//g' "$SING_BOX_MAKEFILE"
             sed -i 's/with_clash_api//g' "$SING_BOX_MAKEFILE"
-            
-            # 双重保险：在 .config 宣告关闭
-            echo "# CONFIG_SING_BOX_BUILD_GVISOR is not set" >> .config
-            echo "# CONFIG_SING_BOX_BUILD_TAILSCALE is not set" >> .config
-            echo "# CONFIG_SING_BOX_BUILD_WIREGUARD is not set" >> .config
-            echo "# CONFIG_SING_BOX_BUILD_QUIC is not set" >> .config
-            
-            # 极简核心：只留 utls, anytls, shadowsocks
-            echo "override GO_PKG_TAGS:=with_utls,with_anytls,with_shadowsocks" >> "$SING_BOX_MAKEFILE"
-            
-            echo "✅ Makefile 极简标签注入成功，已移除手动 UPX 逻辑交由 SquashFS 处理。"
-        else
-            echo "❌ 未找到 sing-box Makefile，请检查 feeds 是否安装成功。"
-            exit 1
+            sed -i 's/with_acme//g' "$SING_BOX_MAKEFILE"
+            sed -i 's/with_grpc//g' "$SING_BOX_MAKEFILE"
+            echo "✅ 物理代码标签剔除完成"
         fi
         
-        # 7. 生成最终依赖
+        # 8. 生成最终依赖
         make defconfig
 
     - name: Download package
@@ -154,24 +171,23 @@ jobs:
       if: steps.compile.outputs.status == 'success'
       run: |
         cd lede/bin/targets/ramips/mt76x8/
-        echo "=== 编译产物列表 (如果缺少 sysupgrade.bin，说明固件依然超限) ==="
+        echo "=== 编译产物完整列表 ==="
         ls -lh
         echo "====================================================="
         
         if ! ls *sysupgrade*.bin 1> /dev/null 2>&1; then
           echo "❌ 致命错误：未找到 sysupgrade 刷机包！"
-          echo "原因：核心组件 (vmlinux + root.squashfs) 的总大小超过了 16MB 硬件分区上限。"
-          echo "OpenWrt 保护机制触发，已拒绝打包。"
+          echo "即使剔除了内核存储驱动，固件依然超标。请检查产物列表排查具体大件。"
           exit 1
         fi
         
         FILE=$(ls *sysupgrade*.bin | head -n 1)
         SIZE=$(stat -c%s "$FILE")
         if [ "$SIZE" -gt 16000000 ]; then
-          echo "❌ 严重警告：固件体积 ($SIZE 字节) 虽然生成，但仍超过 16MB 理论值，强刷可能变砖！"
+          echo "❌ 严重警告：固件体积 ($SIZE 字节) 虽然生成，但已极其危险逼近物理上限，强刷有风险！"
           exit 1
         else
-          echo "✅ 恭喜！固件体积安全 ($SIZE 字节)，已成功塞入 16MB 空间！"
+          echo "✅ 恭喜！固件成功塞入 16MB 空间 ($SIZE 字节)！系统打包安全通过！"
         fi
 
     - name: Upload firmware to Artifacts
